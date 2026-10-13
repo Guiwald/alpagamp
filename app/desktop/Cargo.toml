@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Alpagamp — lecteur de musique à skins classiques"
 edition.workspace = true
 license.workspace = true

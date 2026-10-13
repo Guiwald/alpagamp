@@ -20,3 +20,4 @@ effacée : sa fiche passe au statut « remplacée par ADR n » et reste là.
 | [0013](0013-plugins-d-exemple.md) | Plugins d'exemple | acceptée |
 | [0014](0014-langues-raccourcis-signature.md) | Langues, raccourcis Mac, mode adapté, signature | acceptée |
 | [0015](0015-youtube-music-et-son-systeme.md) | YouTube Music : son du système en 1.1, intégration complète plus tard | acceptée |
+| [0016](0016-fenetres-et-formes.md) | Fenêtres : groupe aimanté, fenêtres génériques skinnées, formes reportées | acceptée |

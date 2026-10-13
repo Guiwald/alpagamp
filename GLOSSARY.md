@@ -12,6 +12,8 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 | **Double taille** | Affichage ×2 au plus proche voisin (fenêtre principale et égaliseur). |
 | **Aimantation** (snap) | Collage automatique des fenêtres entre elles et aux bords de l'écran (10 px). |
 | **Fenêtres attachées** | Fenêtres dont les bords se touchent exactement ; elles suivent la fenêtre principale quand on la déplace. |
+| **Fenêtre générique** | Fenêtre skinnée avec `gen.bmp` / `genex.bmp` : « Aller au morceau », « Ajouter une adresse », plus tard Bibliothèque et plugins (ADR 0016). |
+| **Préréglage automatique** | Préréglage d'égaliseur rattaché à un fichier ; chargé à chaque lecture de ce fichier quand « AUTO » est allumé. |
 | **Clutterbar** | La colonne de lettres O A I D V à gauche de la fenêtre principale. |
 | **Titre défilant** (marquee) | Le texte « N. Titre (m:ss) » qui défile dans la fenêtre principale. |
 | **Visualiseur intégré** | La zone 76×16 de la fenêtre principale : analyseur de spectre ou oscilloscope. |
