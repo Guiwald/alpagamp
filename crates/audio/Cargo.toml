@@ -1,8 +1,18 @@
 [package]
 name = "alpagamp-audio"
 version = "0.1.0"
+description = "Moteur audio d'Alpagamp : décodage, rééchantillonnage, égaliseur, sortie, données de visualisation"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+alpagamp-core.workspace = true
+log.workspace = true
+thiserror.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+cpal = "0.18"
+symphonia = { version = "0.6", features = ["all-codecs", "all-formats"] }
+rubato = "5"
+audioadapter-buffers = "5"
