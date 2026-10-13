@@ -1,0 +1,53 @@
+# Compilation et tests à chaque envoi (ADR 0008).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  linux:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Bibliothèques du système (son, Vulkan logiciel pour les tests de visualisation)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config mesa-vulkan-drivers
+      - name: Tests
+        run: cargo test --workspace
+
+  desktop:
+    name: Compilation (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Compilation
+        run: cargo build --release -p alpagamp
+
+  android:
+    name: Compilation (Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: APK (clé de débogage)
+        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" cargo xtask apk
