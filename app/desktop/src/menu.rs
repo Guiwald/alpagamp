@@ -25,6 +25,9 @@ pub struct MenuState<'a> {
     pub bookmarks: Vec<String>,
     pub library_open: bool,
     pub spotify_connected: bool,
+    pub milk_open: bool,
+    /// Le pack de presets est installé (ou en cours d'installation).
+    pub pack_installed: bool,
 }
 
 pub struct Menus {
@@ -66,7 +69,7 @@ impl Menus {
             let _ = bar.append(&windows_submenu(st));
             let _ = bar.append(&options_submenu(st.settings));
             let _ = bar.append(&skins_submenu(&skins));
-            let _ = bar.append(&vis_submenu(st.settings));
+            let _ = bar.append(&vis_submenu(st));
             bar.init_for_nsapp();
             bar
         };
@@ -86,6 +89,7 @@ impl Menus {
             Popup::PlSort => build_sort(),
             Popup::PlMisc => build_list(&[("jump", "menu.jump_to_file"), ("pl_info", "menu.file_info")]),
             Popup::PlContext => build_pl_context(),
+            Popup::Milk => build_milk(st),
         };
         show(&menu, window);
     }
@@ -123,6 +127,7 @@ impl Menus {
             "shuffle" => ToggleShuffle,
             "manual" => ToggleManualAdvance,
             "load_skin" => LoadSkin,
+            "skin_browser" => ToggleSkins,
             "default_skin" => DefaultSkin,
             "vis_analyzer" => Vis(VisMode::Analyzer),
             "vis_scope" => Vis(VisMode::Oscilloscope),
@@ -179,6 +184,17 @@ impl Menus {
             "vis_dots" => VisScopeStyle(ScopeStyle::Dots),
             "vis_lines" => VisScopeStyle(ScopeStyle::Lines),
             "vis_solid" => VisScopeStyle(ScopeStyle::Solid),
+            "milk" => ToggleMilk,
+            "milk_next" => MilkNext(false),
+            "milk_cut" => MilkNext(true),
+            "milk_prev" => MilkPrevious,
+            "milk_random" => MilkToggleShuffle,
+            "milk_lock" => MilkToggleLock,
+            "milk_choose" => MilkPresets,
+            "milk_full" => MilkFullscreen,
+            "milk_pack" => MilkDownloadPack,
+            "milk_folder" => MilkOpenFolder,
+            "milk_rescan" => MilkRescan,
             other => {
                 if let Some(code) = other.strip_prefix("lang_") {
                     return Lang::ALL.into_iter().find(|l| l.code() == code).map(|l| Language(Some(l)));
@@ -210,6 +226,12 @@ impl Menus {
                 }
                 if let Some(v) = num("vis_refresh_") {
                     return Some(VisRefresh(v as u8));
+                }
+                if let Some(v) = num("milk_auto_") {
+                    return Some(MilkAuto(v as u32));
+                }
+                if let Some(v) = num("milk_blend_") {
+                    return Some(MilkBlend(v as u32));
                 }
                 return None;
             }
@@ -364,6 +386,7 @@ fn bookmarks_submenu(st: &MenuState) -> Submenu {
 
 fn skins_submenu(skins: &[PathBuf]) -> Submenu {
     let m = Submenu::new(t("menu.skins"), true);
+    let _ = m.append(&item("skin_browser", "menu.skin_browser"));
     let _ = m.append(&item("load_skin", "menu.load_skin"));
     let _ = m.append(&item("default_skin", "menu.default_skin"));
     if !skins.is_empty() {
@@ -376,8 +399,8 @@ fn skins_submenu(skins: &[PathBuf]) -> Submenu {
     m
 }
 
-fn vis_submenu(s: &Settings) -> Submenu {
-    let v = &s.vis;
+fn vis_submenu(st: &MenuState) -> Submenu {
+    let v = &st.settings.vis;
     let style = Submenu::with_items(
         t("vis.analyzer_style"),
         true,
@@ -420,6 +443,9 @@ fn vis_submenu(s: &Settings) -> Submenu {
         t("menu.visualization"),
         true,
         &[
+            &check("milk", "menu.milkdrop", st.milk_open),
+            &milk_presets_submenu(st),
+            &sep(),
             &check("vis_analyzer", "menu.analyzer", v.mode == VisMode::Analyzer),
             &check("vis_scope", "menu.oscilloscope", v.mode == VisMode::Oscilloscope),
             &check("vis_off", "menu.vis_off", v.mode == VisMode::Off),
@@ -451,9 +477,51 @@ fn build_main(st: &MenuState, skins: &[PathBuf]) -> Menu {
     let _ = m.append(&bookmarks_submenu(st));
     let _ = m.append(&options_submenu(st.settings));
     let _ = m.append(&skins_submenu(skins));
-    let _ = m.append(&vis_submenu(st.settings));
+    let _ = m.append(&vis_submenu(st));
     let _ = m.append(&sep());
     let _ = m.append(&item("exit", "menu.exit"));
+    m
+}
+
+/// Options de la visualisation : changement automatique, fondu, pack.
+fn milk_presets_submenu(st: &MenuState) -> Submenu {
+    let ms = &st.settings.milkdrop;
+    let m = Submenu::new(t("milk.presets"), true);
+    let _ = m.append(&item("milk_choose", "milk.choose"));
+    let _ = m.append(&check("milk_random", "milk.random", ms.shuffle));
+    let _ = m.append(&check("milk_lock", "milk.lock", ms.locked));
+    let auto = Submenu::new(t("milk.auto"), true);
+    let _ = auto.append(&CheckMenuItem::with_id("milk_auto_0", t("milk.never"), true, ms.auto_secs == 0, None));
+    for secs in [10u32, 15, 20, 30, 45, 60, 120] {
+        let _ = auto.append(&CheckMenuItem::with_id(format!("milk_auto_{secs}"), format!("{secs} s"), true, ms.auto_secs == secs, None));
+    }
+    let _ = m.append(&auto);
+    let blend = Submenu::new(t("milk.blend"), true);
+    let _ = blend.append(&CheckMenuItem::with_id("milk_blend_0", t("milk.cut"), true, ms.blend_tenths == 0, None));
+    for tenths in [10u32, 20, 27, 40, 60] {
+        let label = format!("{:.1} s", tenths as f32 / 10.0);
+        let _ = blend.append(&CheckMenuItem::with_id(format!("milk_blend_{tenths}"), label, true, ms.blend_tenths == tenths, None));
+    }
+    let _ = m.append(&blend);
+    let _ = m.append(&sep());
+    let _ = m.append(&MenuItem::with_id("milk_pack", t("milk.download"), !st.pack_installed, None));
+    let _ = m.append(&item("milk_folder", "milk.open_folder"));
+    let _ = m.append(&item("milk_rescan", "milk.rescan"));
+    m
+}
+
+fn build_milk(st: &MenuState) -> Menu {
+    let m = Menu::new();
+    let _ = m.append(&item("milk_next", "milk.next"));
+    let _ = m.append(&item("milk_cut", "milk.next_cut"));
+    let _ = m.append(&item("milk_prev", "milk.previous"));
+    let _ = m.append(&sep());
+    let _ = m.append(&milk_presets_submenu(st));
+    let _ = m.append(&item("milk_full", "milk.fullscreen"));
+    let _ = m.append(&sep());
+    let _ = m.append(&playback_submenu());
+    let _ = m.append(&sep());
+    let _ = m.append(&check("milk", "menu.milkdrop", st.milk_open));
     m
 }
 
@@ -525,16 +593,4 @@ fn build_pl_context() -> Menu {
     m
 }
 
-/// Skins `.wsz` / `.zip` rangés dans le dossier des skins.
-pub fn list_skins(dir: &Path) -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .filter(|p| matches!(p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("wsz" | "zip")))
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort();
-    v
-}
+pub use alpagamp_museum::list_skins;

@@ -1,5 +1,8 @@
 //! L'appli Android : une seule surface où sont empilées la fenêtre principale, l'égaliseur et la playlist,
-//! agrandies à la largeur de l'écran ; menus et boîtes en surimpression (fenêtres génériques skinnées).
+//! agrandies à la largeur de l'écran ; menus et boîtes en surimpression (fenêtres génériques skinnées) ;
+//! visualisation MilkDrop en plein écran (module `milk`).
+
+mod milk;
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -18,9 +21,11 @@ use alpagamp_core::time::format_duration;
 use alpagamp_core::{Entry, Settings, Source};
 use alpagamp_player::Player;
 use alpagamp_skin::{Image, Skin};
-use alpagamp_ui::text::draw_runs_at;
+use alpagamp_ui::text::{TextRun, draw_runs_at};
+use alpagamp_museum::{Apply as SkinApply, Browser as SkinBrowser};
+use alpagamp_ui::{SkinsView, SkinsWindow};
 use alpagamp_ui::{
-    Action, EqView, EqWindow, GenKey, GenKind, GenView, GenWindow, LibTab, LibraryAction, LibraryView, LibraryWindow, MainWindow, MenuItem,
+    Action, EqView, EqWindow, GenKey, GenKind, GenList, GenView, GenWindow, LibTab, LibraryAction, LibraryView, LibraryWindow, MainWindow, MenuItem,
     MenuResult, MenuWindow, Mods, PlMenuItem, PlaylistView, PlaylistWindow,
 };
 use winit::application::ApplicationHandler;
@@ -62,12 +67,16 @@ enum MenuKind {
     EqPresets,
     Playlist,
     Info,
+    /// Menu de la visualisation (appui long dessus).
+    Milk,
 }
 
 enum Overlay {
     Gen(GenWindow),
     Menu(MenuWindow, MenuKind),
     Library,
+    /// Navigateur de skins.
+    Skins,
 }
 
 struct Touch {
@@ -108,14 +117,17 @@ pub struct Mobile {
     mouse_down: bool,
     sim_size: Option<(u32, u32)>,
     window: Option<Rc<Window>>,
-    surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
+    screen: Option<milk::Screen>,
+    milk: milk::MobileMilk,
     player: Player,
     skin: Skin,
+    default_skin: Skin,
     main_ui: MainWindow,
     eq_ui: EqWindow,
     pl_ui: PlaylistWindow,
     overlay: Option<Overlay>,
     lib_ui: LibraryWindow,
+    skins: SkinBrowser,
     spotify: Arc<Spotify>,
     lib_pending: Option<u64>,
     enqueue_pending: Option<u64>,
@@ -160,6 +172,14 @@ impl Mobile {
             Source::Spotify(uri) => Some(Media::Custom(sp.opener(uri))),
             _ => None,
         }));
+        let default_skin = Skin::default_skin();
+        let skin = player
+            .settings
+            .skin
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok().and_then(|b| Skin::load_wsz("", &b, &default_skin).ok()))
+            .unwrap_or_else(|| default_skin.clone());
+        let skins = SkinBrowser::new(data.join("skins"), SkinsWindow::default());
         let eq_open = player.settings.eq_window.map(|w| w.open).unwrap_or(true);
         let pl_open = player.settings.playlist_window.map(|w| w.open).unwrap_or(true);
         Mobile {
@@ -168,14 +188,17 @@ impl Mobile {
             mouse_down: false,
             sim_size: None,
             window: None,
-            surface: None,
+            screen: None,
+            milk: milk::MobileMilk::default(),
             player,
-            skin: Skin::default_skin(),
+            skin,
+            default_skin,
             main_ui: MainWindow::new(),
             eq_ui: EqWindow::new(),
             pl_ui: PlaylistWindow::default(),
             overlay: None,
             lib_ui: LibraryWindow::default(),
+            skins,
             spotify,
             lib_pending: None,
             enqueue_pending: None,
@@ -251,6 +274,11 @@ impl Mobile {
                     self.lib_ui.set_height((116 + ((avail - 116) / 29).max(0) * 29) as u32);
                     self.lib_ui.size().1
                 }
+                Overlay::Skins => {
+                    let avail = ((bottom - top) / scale) as i32;
+                    self.skins.ui.set_height((116 + ((avail - 116) / 29).max(0) * 29) as u32);
+                    self.skins.ui.size().1
+                }
             };
             regions.push((Region::Overlay, top, oh));
         }
@@ -264,13 +292,15 @@ impl Mobile {
 
     fn redraw(&mut self) {
         self.relayout();
-        let Some(surface) = self.surface.as_mut() else { return };
-        let (w, h) = (self.layout.w, self.layout.h);
-        let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) else { return };
-        if surface.resize(nw, nh).is_err() {
-            return;
+        match self.screen {
+            None => {}
+            Some(milk::Screen::Gpu(_)) => self.redraw_gpu(),
+            Some(milk::Screen::Soft(_)) => self.redraw_soft(),
         }
-        // Rendu de chaque fenêtre à l'échelle 1.
+    }
+
+    /// Dessine chaque fenêtre à l'échelle 1 ; renvoie le texte de la surimpression.
+    fn render_windows(&mut self) -> Vec<TextRun> {
         let clock = self.start.elapsed().as_millis() as u64;
         let mut mv = self.player.main_view(clock);
         mv.active = self.overlay.is_none();
@@ -284,13 +314,18 @@ impl Mobile {
         let pl = &self.player.playlist;
         let pv = PlaylistView { entries: pl.entries(), current: pl.current(), active: false, total: pl.total_time(), selected: pl.selected_time(), time_text };
         self.pl_ui.render(&mut self.fbs[2], &self.skin, &pv);
-        let overlay_text = match &mut self.overlay {
+        match &mut self.overlay {
             Some(Overlay::Gen(g)) => {
                 let (title, prompt, ok, cancel) = match g.kind {
                     GenKind::Jump => (t("jump.title"), t("jump.prompt"), t("pl.play_item"), t("dialog.close")),
                     GenKind::AddUrl => (t("url.title"), t("url.prompt"), t("dialog.ok"), t("dialog.cancel")),
+                    GenKind::Presets => (t("milk.presets"), t("milk.search"), t("milk.show"), t("dialog.close")),
                 };
-                let gv = GenView { entries: self.player.playlist.entries(), active: true, title, prompt, ok_label: ok, cancel_label: cancel };
+                let list = match g.kind {
+                    GenKind::Presets => GenList::Items(&self.milk.items),
+                    _ => GenList::Entries(self.player.playlist.entries()),
+                };
+                let gv = GenView { list, active: true, title, prompt, ok_label: ok, cancel_label: cancel };
                 g.render(&mut self.fbs[3], &self.skin, &gv);
                 g.text.clone()
             }
@@ -314,13 +349,34 @@ impl Mobile {
                 self.lib_ui.render(&mut self.fbs[3], &self.skin, &view);
                 self.lib_ui.text.clone()
             }
+            Some(Overlay::Skins) => {
+                let status = self.skins.status();
+                let view = SkinsView {
+                    active: true,
+                    title: t("skins.title"),
+                    tabs: [t("skins.museum"), t("skins.mine")],
+                    prompt: t("skins.search"),
+                    open: "",
+                    close: t("dialog.close"),
+                    status: &status,
+                };
+                self.skins.ui.render(&mut self.fbs[3], &self.skin, &view);
+                self.skins.ui.text.clone()
+            }
             None => Vec::new(),
-        };
-        let Ok(mut buf) = surface.buffer_mut() else { return };
-        buf.fill(0);
+        }
+    }
+
+    /// Compose les fenêtres agrandies dans `buf` (`w`×`h`). `only_overlay` : seulement la surimpression.
+    /// `mask` est appliqué aux pixels (alpha à 0 pour softbuffer, à 255 pour un calque mélangé).
+    fn compose(&self, buf: &mut [u32], w: u32, h: u32, overlay_text: &[TextRun], only_overlay: bool, mask: u32) {
         let scale = self.layout.scale;
         let xmap: Vec<usize> = (0..w).map(|x| ((x as f32 / scale) as usize).min(274)).collect();
+        let set_alpha = mask >> 24 == 0xFF;
         for &(region, y0, rh) in &self.layout.regions {
+            if only_overlay && region != Region::Overlay {
+                continue;
+            }
             let img = match region {
                 Region::Main => &self.fbs[0],
                 Region::Eq => &self.fbs[1],
@@ -334,17 +390,34 @@ impl Mobile {
                 let src = &img.pixels[(sy * img.width) as usize..((sy + 1) * img.width) as usize];
                 let dst = &mut buf[(y * w) as usize..((y + 1) * w) as usize];
                 for (x, d) in dst.iter_mut().enumerate() {
-                    *d = src[xmap[x].min(src.len() - 1)] & 0x00FF_FFFF;
+                    let p = src[xmap[x].min(src.len() - 1)];
+                    *d = if set_alpha { p | 0xFF00_0000 } else { p & mask };
                 }
             }
             let runs = match region {
                 Region::Playlist => &self.pl_ui.text,
-                Region::Overlay => &overlay_text,
+                Region::Overlay => overlay_text,
                 _ => continue,
             };
-            draw_runs_at(&mut buf, w, h, scale, (0.0, y0), runs);
+            draw_runs_at(buf, w, h, scale, (0.0, y0), runs);
         }
-        let _ = buf.present();
+    }
+
+    fn redraw_soft(&mut self) {
+        let (w, h) = (self.layout.w, self.layout.h);
+        let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) else { return };
+        let overlay_text = self.render_windows();
+        let mut screen = self.screen.take();
+        if let Some(milk::Screen::Soft(surface)) = screen.as_mut() {
+            if surface.resize(nw, nh).is_ok() {
+                if let Ok(mut buf) = surface.buffer_mut() {
+                    buf.fill(0);
+                    self.compose(&mut buf, w, h, &overlay_text, false, 0x00FF_FFFF);
+                    let _ = buf.present();
+                }
+            }
+        }
+        self.screen = screen;
     }
 
     // --- Toucher ----------------------------------------------------------------------------------
@@ -357,6 +430,10 @@ impl Mobile {
     fn touch_start(&mut self, id: u64, x: f64, y: f64, el: &ActiveEventLoop) {
         if self.touch.is_some() {
             return; // un seul doigt
+        }
+        if self.milk.on && self.overlay.is_none() {
+            self.milk_touch_start(id, x, y);
+            return;
         }
         let Some((region, y0)) = self.layout.region_at(y) else {
             // Hors de toute fenêtre : ferme une surimpression.
@@ -404,6 +481,19 @@ impl Mobile {
                         a
                     }
                 }
+                Some(Overlay::Skins) => {
+                    if self.skins.ui.in_list(sx, sy) {
+                        list = true;
+                        Vec::new()
+                    } else {
+                        let a = self.skins.ui.mouse_down(sx, sy, false);
+                        // Champ de recherche du musée : le clavier.
+                        if a.is_empty() && self.skins.ui.tab == alpagamp_ui::SkinsTab::Museum && sx >= 113 && (22..37).contains(&sy) {
+                            self.host.show_keyboard(true);
+                        }
+                        a
+                    }
+                }
                 None => Vec::new(),
             },
         };
@@ -417,6 +507,9 @@ impl Mobile {
     }
 
     fn touch_move(&mut self, id: u64, x: f64, y: f64, el: &ActiveEventLoop) {
+        if self.milk.touch.is_some() {
+            return;
+        }
         let scale = self.layout.scale.max(0.01) as f64;
         let Some(t) = self.touch.as_mut().filter(|t| t.id == id) else { return };
         let dy = (y - t.last.1) / scale;
@@ -427,11 +520,15 @@ impl Mobile {
         let (region, list, moved) = (t.region, t.list, t.moved);
         if list {
             if moved {
-                t.scroll_acc -= dy / alpagamp_ui::playlist_window::ROW_H as f64;
+                let skins = matches!(self.overlay, Some(Overlay::Skins)) && region == Region::Overlay;
+                let row_h = if skins { alpagamp_ui::skins_window::ROW_H } else { alpagamp_ui::playlist_window::ROW_H };
+                t.scroll_acc -= dy / row_h as f64;
                 let rows = t.scroll_acc.trunc();
                 if rows != 0.0 {
                     t.scroll_acc -= rows;
-                    if region == Region::Overlay {
+                    if skins {
+                        self.skins.ui.scroll_by(rows as isize);
+                    } else if region == Region::Overlay {
                         self.lib_ui.scroll_by(rows as isize);
                     } else {
                         self.pl_ui.scroll_by(rows as isize);
@@ -466,6 +563,7 @@ impl Mobile {
                     }
                     Some(Overlay::Gen(g)) => g.mouse_move(sx, sy),
                     Some(Overlay::Library) => self.lib_ui.mouse_move(sx, sy),
+                    Some(Overlay::Skins) => self.skins.ui.mouse_move(sx, sy, false),
                     _ => {}
                 }
                 Vec::new()
@@ -477,12 +575,25 @@ impl Mobile {
     }
 
     fn touch_end(&mut self, id: u64, x: f64, y: f64, cancelled: bool, el: &ActiveEventLoop) {
+        if self.milk.touch.is_some() {
+            self.milk_touch_end(id, x, y, cancelled);
+            return;
+        }
         let Some(t) = self.touch.take().filter(|t| t.id == id) else { return };
         let y0 = self.layout.origin(t.region).unwrap_or(0.0);
         let (sx, sy) = if t.long_done || cancelled { (-10_000, -10_000) } else { self.to_skin(x, y, y0) };
         let now = Instant::now();
         let double = !t.moved && self.last_tap.is_some_and(|(at, r, lx, ly)| r == t.region && now - at < DOUBLE_TAP && (lx - sx).abs() < 6 && (ly - sy).abs() < 6);
         self.last_tap = if double || t.moved { None } else { Some((now, t.region, sx, sy)) };
+        if t.list && t.region == Region::Overlay && matches!(self.overlay, Some(Overlay::Skins)) {
+            if !t.moved && !cancelled {
+                if let Some(i) = self.skins.ui.row_at(sx, sy) {
+                    self.skins.ui.sel = Some(i);
+                    self.action(Region::Overlay, Action::Skins(alpagamp_ui::SkinsAction::Apply(i)), el);
+                }
+            }
+            return;
+        }
         if t.list && t.region == Region::Overlay {
             if t.moved || cancelled {
                 return;
@@ -561,6 +672,7 @@ impl Mobile {
                         a
                     }
                     Some(Overlay::Library) => self.lib_ui.mouse_up(sx, sy),
+                    Some(Overlay::Skins) => self.skins.ui.mouse_up(sx, sy, false),
                     None => Vec::new(),
                 }
             }
@@ -574,6 +686,10 @@ impl Mobile {
 
     /// Appui long : menu de la liste ou menu principal.
     fn check_long_press(&mut self) {
+        if self.milk.touch.is_some() {
+            self.milk_long_press();
+            return;
+        }
         let Some(t) = self.touch.as_mut() else { return };
         if t.moved || t.long_done || t.at.elapsed() < LONG_PRESS || t.region == Region::Overlay {
             return;
@@ -604,7 +720,7 @@ impl Mobile {
     // --- Surimpressions ---------------------------------------------------------------------------
 
     fn close_overlay(&mut self) {
-        if matches!(self.overlay, Some(Overlay::Gen(_)) | Some(Overlay::Library)) {
+        if matches!(self.overlay, Some(Overlay::Gen(_)) | Some(Overlay::Library) | Some(Overlay::Skins)) {
             self.host.show_keyboard(false);
         }
         self.overlay = None;
@@ -630,12 +746,14 @@ impl Mobile {
             MenuKind::EqPresets => self.eq_menu(),
             MenuKind::Playlist => self.playlist_menu(),
             MenuKind::Info => self.info_menu(),
+            MenuKind::Milk => self.milk_menu(),
         };
         let title = match kind {
             MenuKind::Main => "Alpagamp",
             MenuKind::EqPresets => t("eq.presets"),
             MenuKind::Playlist => t("menu.playlist_editor"),
             MenuKind::Info => t("info.title"),
+            MenuKind::Milk => t("milk.title"),
         };
         let m = MenuWindow::new(title, items, 275, self.overlay_max_h());
         self.overlay = Some(Overlay::Menu(m, kind));
@@ -653,6 +771,8 @@ impl Mobile {
         let radios = RADIOS.iter().enumerate().map(|(i, (name, _))| MenuItem::new(&format!("radio_{i}"), name)).collect();
         vec![
             MenuItem::new("library", t("menu.library")),
+            MenuItem::new("milk", t("mobile.milk")),
+            MenuItem::new("skins", t("menu.skin_browser")),
             MenuItem::new("music_scan", t("mobile.phone_music")),
             MenuItem::sub(t("mobile.radios"), radios),
             MenuItem::new("add_url", t("pl.add_url")),
@@ -690,6 +810,7 @@ impl Mobile {
                         ],
                     ),
                     MenuItem::sub(t("menu.language"), langs),
+                    MenuItem::check("milk_gpu", t("milk.gpu"), s.milkdrop.gpu),
                 ],
             ),
             MenuItem::sub(
@@ -816,11 +937,21 @@ impl Mobile {
 
     fn menu_command(&mut self, kind: MenuKind, id: &str, el: &ActiveEventLoop) {
         let _ = kind;
+        if self.milk_menu_command(id) {
+            return;
+        }
         let p = &mut self.player;
         let num = |prefix: &str| id.strip_prefix(prefix).and_then(|n| n.parse::<i64>().ok());
         match id {
             "" => {}
             "library" => self.open_library(),
+            "skins" => {
+                self.overlay = Some(Overlay::Skins);
+                if self.skins.is_empty() {
+                    let cur = self.player.settings.skin.clone();
+                    self.skins.load_tab(cur.as_deref());
+                }
+            }
             "spotify_login" => {
                 self.spotify.login();
                 self.open_library();
@@ -951,6 +1082,23 @@ impl Mobile {
         }
     }
 
+    fn apply_skin(&mut self, a: SkinApply) {
+        match a {
+            SkinApply::Default => {
+                self.skin = self.default_skin.clone();
+                self.player.settings.skin = None;
+            }
+            SkinApply::File(p) => match std::fs::read(&p).map_err(|e| e.to_string()).and_then(|b| Skin::load_wsz("", &b, &self.default_skin).map_err(|e| e.to_string())) {
+                Ok(s) => {
+                    self.skin = s;
+                    self.player.settings.skin = Some(p);
+                }
+                Err(e) => self.main_ui.marquee.flash(&format!("{} : {e}", t("error.skin"))),
+            },
+            SkinApply::OpenDialog => {}
+        }
+    }
+
     fn edit(&mut self, f: impl FnOnce(&mut alpagamp_core::Playlist)) {
         f(&mut self.player.playlist);
         self.player.playlist_changed();
@@ -989,7 +1137,8 @@ impl Mobile {
                 Region::Overlay => {}
             },
             Action::OptionsMenu | Action::VisMenu | Action::About => self.open_menu(MenuKind::Main),
-            Action::ToggleAlwaysOnTop | Action::ToggleDoubleSize | Action::ToggleVisPlugin | Action::StartMove => {}
+            Action::ToggleVisPlugin => self.milk_enter(),
+            Action::ToggleAlwaysOnTop | Action::ToggleDoubleSize | Action::StartMove => {}
             Action::FileInfo => self.open_menu(MenuKind::Info),
             Action::ToggleTimeMode => p.settings.time_remaining = !p.settings.time_remaining,
             Action::CycleVisMode => p.settings.vis.mode = p.settings.vis.mode.cycle(),
@@ -1061,15 +1210,29 @@ impl Mobile {
                 }
             }
             Action::Library(la) => self.library_action(la),
+            Action::SelectPreset(i) => {
+                self.close_overlay();
+                self.milk_select(i);
+            }
+            Action::MilkResize(..) | Action::MilkFullscreen => {}
+            Action::Skins(sa) => {
+                let cur = self.player.settings.skin.clone();
+                if let Some(apply) = self.skins.action(sa, cur.as_deref()) {
+                    self.apply_skin(apply);
+                }
+            }
         }
     }
 
     fn gen_key(&mut self, key: GenKey, el: &ActiveEventLoop) {
         let Some(Overlay::Gen(g)) = self.overlay.as_mut() else { return };
         let actions = g.key(key);
-        if g.take_query_changed() && g.kind == GenKind::Jump {
-            let r = self.player.playlist.search(&g.query);
-            g.set_results(r);
+        if g.take_query_changed() {
+            match g.kind {
+                GenKind::Jump => g.set_results(self.player.playlist.search(&g.query)),
+                GenKind::Presets => g.set_results(self.milk.engine.as_ref().map(|m| m.presets.search(&g.query)).unwrap_or_default()),
+                GenKind::AddUrl => {}
+            }
         }
         for a in actions {
             self.action(Region::Overlay, a, el);
@@ -1241,10 +1404,7 @@ impl Mobile {
             }
         }
         let Some(w) = self.window.clone() else { return };
-        match softbuffer::Context::new(w.clone()).and_then(|c| softbuffer::Surface::new(&c, w.clone())) {
-            Ok(s) => self.surface = Some(s),
-            Err(e) => log::error!("surface : {e}"),
-        }
+        self.screen = self.make_screen(w.clone());
         w.request_redraw();
     }
 }
@@ -1299,7 +1459,8 @@ impl ApplicationHandler for Mobile {
 
     fn suspended(&mut self, _el: &ActiveEventLoop) {
         // La surface disparaît ; la musique continue (jusqu'à ce que le système arrête l'appli).
-        self.surface = None;
+        self.screen = None;
+        self.milk.ui_layer = None;
         self.save();
     }
 
@@ -1354,6 +1515,8 @@ impl ApplicationHandler for Mobile {
                     Key::Named(NamedKey::GoBack) | Key::Named(NamedKey::BrowserBack) | Key::Named(NamedKey::Escape) => {
                         if self.overlay.is_some() {
                             self.close_overlay();
+                        } else if self.milk.on {
+                            self.milk_leave();
                         }
                         None
                     }
@@ -1368,7 +1531,13 @@ impl ApplicationHandler for Mobile {
                     Key::Character(c) => Some(GenKey::Text(event.text.as_ref().map(|t| t.to_string()).unwrap_or_else(|| c.to_string()))),
                     _ => event.text.as_ref().map(|t| GenKey::Text(t.to_string())),
                 };
-                if matches!(self.overlay, Some(Overlay::Library)) {
+                if matches!(self.overlay, Some(Overlay::Skins)) {
+                    if let Some(k) = key {
+                        for a in self.skins.ui.key(k) {
+                            self.action(Region::Overlay, a, el);
+                        }
+                    }
+                } else if matches!(self.overlay, Some(Overlay::Library)) {
                     if let Some(k) = key {
                         for a in self.lib_ui.key(k) {
                             self.action(Region::Overlay, a, el);
@@ -1391,6 +1560,11 @@ impl ApplicationHandler for Mobile {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         self.spotify_events();
+        self.milk_tick();
+        let skins_visible = matches!(self.overlay, Some(Overlay::Skins));
+        if let Some(a) = self.skins.tick(skins_visible, &self.default_skin) {
+            self.apply_skin(a);
+        }
         self.player.tick();
         if self.player.take_track_changed().is_some() {
             if let Some(i) = self.player.playlist.current() {
@@ -1411,7 +1585,7 @@ impl ApplicationHandler for Mobile {
         }
         let now = Instant::now();
         let playing = self.player.state() == PlayState::Playing;
-        let interval = Duration::from_millis(if playing || self.touch.is_some() { 16 } else { 100 });
+        let interval = Duration::from_millis(if playing || self.milk.on || self.touch.is_some() { 16 } else { 100 });
         if now >= self.next_frame {
             let dt = (now - self.last_frame).as_secs_f32().min(0.25);
             self.last_frame = now;

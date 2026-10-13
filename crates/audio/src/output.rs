@@ -69,6 +69,17 @@ impl VisRing {
         }
     }
 
+    /// Trames écrites depuis `cursor` (entrelacées, au plus l'anneau entier), ajoutées à `out` ; avance `cursor`.
+    pub fn since(&self, cursor: &mut u64, out: &mut Vec<f32>) {
+        let n = self.total.saturating_sub(*cursor).min(VIS_RING_FRAMES as u64) as usize;
+        for i in 0..n {
+            let idx = (self.write + VIS_RING_FRAMES - n + i) % VIS_RING_FRAMES;
+            out.push(self.buf[idx * 2]);
+            out.push(self.buf[idx * 2 + 1]);
+        }
+        *cursor = self.total;
+    }
+
     pub fn clear(&mut self) {
         self.buf.fill(0.0);
     }

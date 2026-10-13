@@ -119,3 +119,17 @@ pub fn open_url(url: &str) {
         log::warn!("navigateur : {e} — ouvrir à la main : {url}");
     }
 }
+
+/// Ouvre un dossier dans le gestionnaire de fichiers.
+pub fn open_folder(dir: &Path) {
+    let _ = std::fs::create_dir_all(dir);
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(dir).spawn();
+    #[cfg(target_os = "windows")]
+    let r = std::process::Command::new("explorer").arg(dir).spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let r = std::process::Command::new("xdg-open").arg(dir).spawn();
+    if let Err(e) = r {
+        log::warn!("gestionnaire de fichiers : {e} — dossier : {}", dir.display());
+    }
+}

@@ -1,4 +1,5 @@
-//! Fenêtres génériques skinnées (`gen.bmp` / `genex.bmp`) : « Aller au morceau » (J) et « Ajouter une adresse ».
+//! Fenêtres génériques skinnées (`gen.bmp` / `genex.bmp`) : « Aller au morceau » (J), « Ajouter une adresse » et
+//! « Choisir un preset » (visualisation).
 //!
 //! Ces fenêtres servent aussi de base aux futures fenêtres (Bibliothèque Spotify, plugins).
 
@@ -21,6 +22,17 @@ pub enum GenKind {
     Jump,
     /// Saisir l'adresse d'un flux.
     AddUrl,
+    /// Chercher un preset de visualisation et l'afficher.
+    Presets,
+}
+
+/// Les lignes que la fenêtre peut lister.
+#[derive(Clone, Copy)]
+pub enum GenList<'a> {
+    /// Entrées de playlist (« Aller au morceau »).
+    Entries(&'a [Entry]),
+    /// (titre, détail à droite).
+    Items(&'a [(String, String)]),
 }
 
 /// Touches utiles à une fenêtre générique.
@@ -43,7 +55,7 @@ pub enum GenKey {
 
 /// Textes affichés (traduits par l'application).
 pub struct GenView<'a> {
-    pub entries: &'a [Entry],
+    pub list: GenList<'a>,
     pub active: bool,
     pub title: &'a str,
     pub prompt: &'a str,
@@ -86,7 +98,7 @@ fn inside(x: i32, y: i32, rx: i32, ry: i32, rw: i32, rh: i32) -> bool {
 impl GenWindow {
     pub fn new(kind: GenKind) -> Self {
         let h = match kind {
-            GenKind::Jump => 116 + 29 * 4,
+            GenKind::Jump | GenKind::Presets => 116 + 29 * 4,
             GenKind::AddUrl => 116,
         };
         Self {
@@ -136,7 +148,7 @@ impl GenWindow {
 
     fn field_rect(&self) -> Rect {
         let y = match self.kind {
-            GenKind::Jump => 36,
+            GenKind::Jump | GenKind::Presets => 36,
             GenKind::AddUrl => 40,
         };
         Rect::new(17, y, self.w as i32 - 17 - 13, 14)
@@ -182,7 +194,7 @@ impl GenWindow {
         if inside(x, y, f.x, f.y, f.w, f.h) {
             return Zone::Field;
         }
-        if self.kind == GenKind::Jump {
+        if self.has_list() {
             let l = self.list_rect();
             if inside(x, y, l.x, l.y + 1, l.w, l.h - 2) {
                 let i = self.scroll + ((y - l.y - 1) / ROW_H) as usize;
@@ -192,6 +204,10 @@ impl GenWindow {
             }
         }
         Zone::Background
+    }
+
+    fn has_list(&self) -> bool {
+        matches!(self.kind, GenKind::Jump | GenKind::Presets)
     }
 
     fn ensure_visible(&mut self) {
@@ -206,6 +222,7 @@ impl GenWindow {
     fn submit(&self) -> Vec<Action> {
         match self.kind {
             GenKind::Jump => self.results.get(self.sel).map(|&i| vec![Action::JumpTo(i)]).unwrap_or_default(),
+            GenKind::Presets => self.results.get(self.sel).map(|&i| vec![Action::SelectPreset(i)]).unwrap_or_default(),
             GenKind::AddUrl => {
                 let q = self.query.trim();
                 if q.is_empty() { Vec::new() } else { vec![Action::SubmitUrl(q.to_string())] }
@@ -359,7 +376,7 @@ impl GenWindow {
             p.fill(cx, f.y + 2, 1, f.h - 4, colors.item_fg());
         }
         // Liste des résultats.
-        if self.kind == GenKind::Jump {
+        if self.has_list() {
             let l = self.list_rect();
             sunken(&mut p, l, colors.item_bg(), colors.divider());
             // Comme la playlist : couleur de sélection + texte des éléments (les couleurs « liste sélectionnée »
@@ -368,7 +385,16 @@ impl GenWindow {
             for r in 0..self.visible_rows() {
                 let i = self.scroll + r;
                 let Some(&pi) = self.results.get(i) else { break };
-                let Some(e) = v.entries.get(pi) else { continue };
+                let (title, detail) = match v.list {
+                    GenList::Entries(entries) => {
+                        let Some(e) = entries.get(pi) else { continue };
+                        (format!("{}. {}", pi + 1, e.display_title()), e.duration_ms.map(format_duration).unwrap_or_default())
+                    }
+                    GenList::Items(items) => {
+                        let Some((t, d)) = items.get(pi) else { continue };
+                        (t.clone(), d.clone())
+                    }
+                };
                 let ry = l.y + 1 + r as i32 * ROW_H;
                 let selected = i == self.sel;
                 if selected {
@@ -376,13 +402,14 @@ impl GenWindow {
                 }
                 let color = if selected { sel_fg } else { colors.item_fg() };
                 let clip = Rect::new(l.x + 1, ry, l.w - 2, ROW_H);
-                let dur = e.duration_ms.map(format_duration).unwrap_or_default();
                 let right = (l.x + l.w - 4) as f32;
-                let title = format!("{}. {}", pi + 1, e.display_title());
-                let max = right - text::measure(&dur, FONT) - 8.0 - (l.x + 3) as f32;
-                self.text.push(TextRun { x: (l.x + 3) as f32, y: ry as f32 + 1.0, text: text::ellipsize(&title, FONT, max), color, size: FONT, clip, align: Align::Left });
-                if !dur.is_empty() {
-                    self.text.push(TextRun { x: right, y: ry as f32 + 1.0, text: dur, color, size: FONT, clip, align: Align::Right });
+                let left = (l.x + 3) as f32;
+                // Le détail (durée, dossier) prend au plus 40 % de la largeur.
+                let detail = text::ellipsize(&detail, FONT, (right - left) * 0.4);
+                let max = right - text::measure(&detail, FONT) - 8.0 - left;
+                self.text.push(TextRun { x: left, y: ry as f32 + 1.0, text: text::ellipsize(&title, FONT, max), color, size: FONT, clip, align: Align::Left });
+                if !detail.is_empty() {
+                    self.text.push(TextRun { x: right, y: ry as f32 + 1.0, text: detail, color, size: FONT, clip, align: Align::Right });
                 }
             }
         }
@@ -411,13 +438,38 @@ fn sunken(p: &mut Painter, r: Rect, bg: u32, border: u32) {
     p.fill(r.x + 1, r.y + 1, r.w - 2, r.h - 2, bg);
 }
 
+/// Les lettres de `gen.bmp` vont de A à Z : on retire les accents (« VISUALIZACIÓN » → « VISUALIZACION »).
+fn fold_title(title: &str) -> String {
+    title
+        .to_uppercase()
+        .chars()
+        .flat_map(|c| {
+            let base = match c {
+                'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => "A",
+                'Ç' => "C",
+                'È' | 'É' | 'Ê' | 'Ë' => "E",
+                'Ì' | 'Í' | 'Î' | 'Ï' => "I",
+                'Ñ' => "N",
+                'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' => "O",
+                'Ù' | 'Ú' | 'Û' | 'Ü' => "U",
+                'Ý' | 'Ÿ' => "Y",
+                'ß' => "SS",
+                'Æ' => "AE",
+                'Œ' => "OE",
+                _ => "",
+            };
+            if base.is_empty() { vec![c] } else { base.chars().collect() }
+        })
+        .collect()
+}
+
 /// Dessine le cadre d'une fenêtre générique (barre de titre avec les lettres de `gen.bmp`, côtés, bas).
 pub fn draw_frame(p: &mut Painter, w: i32, h: i32, title: &str, active: bool, close_down: bool) {
     let a = if active { 1 } else { 0 };
     let letters = p.skin.gen_letters();
     let set = &letters[if active { 0 } else { 1 }];
     let row = if active { 88 } else { 96 };
-    let title: String = title.to_uppercase();
+    let title: String = fold_title(title);
     let letter_w = |c: char| -> i32 {
         if c.is_ascii_uppercase() { set[(c as u8 - b'A') as usize].1 } else { 5 }
     };
@@ -502,9 +554,23 @@ mod tests {
         let mut g = GenWindow::new(GenKind::Jump);
         g.set_results(vec![0, 2]);
         let mut fb = Image::new(1, 1, 0);
-        let v = GenView { entries: &entries, active: true, title: "Jump to file", prompt: "Search:", ok_label: "Play", cancel_label: "Close" };
+        let v = GenView { list: GenList::Entries(&entries), active: true, title: "Jump to file", prompt: "Search:", ok_label: "Play", cancel_label: "Close" };
         g.render(&mut fb, &skin, &v);
         assert_eq!((fb.width, fb.height), (275, 232));
         assert!(g.text.len() >= 4);
+        assert_eq!(fold_title("Visualización"), "VISUALIZACION");
+    }
+
+    #[test]
+    fn presets_list_submits_index() {
+        let mut g = GenWindow::new(GenKind::Presets);
+        g.set_results(vec![3, 8]);
+        g.key(GenKey::Down);
+        assert_eq!(g.key(GenKey::Enter), vec![Action::SelectPreset(8)]);
+        let items = vec![("a".to_string(), "Dancer".to_string()); 10];
+        let mut fb = Image::new(1, 1, 0);
+        let v = GenView { list: GenList::Items(&items), active: true, title: "Presets", prompt: "Search:", ok_label: "Show", cancel_label: "Close" };
+        g.render(&mut fb, &Skin::default_skin(), &v);
+        assert!(g.text.iter().any(|r| r.text == "Dancer"));
     }
 }

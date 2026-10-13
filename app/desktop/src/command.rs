@@ -102,6 +102,26 @@ pub enum Command {
     VisPeakFalloff(u8),
     VisScopeStyle(ScopeStyle),
     VisRefresh(u8),
+    // --- Fenêtre de visualisation (presets MilkDrop) ---
+    ToggleMilk,
+    /// Preset suivant (`true` : sans fondu).
+    MilkNext(bool),
+    MilkPrevious,
+    MilkToggleShuffle,
+    MilkToggleLock,
+    /// « Choisir un preset ».
+    MilkPresets,
+    MilkFullscreen,
+    MilkLeaveFullscreen,
+    /// Changement automatique toutes les n secondes (0 : jamais).
+    MilkAuto(u32),
+    /// Durée du fondu (dixièmes de seconde, 0 : coupe franche).
+    MilkBlend(u32),
+    MilkDownloadPack,
+    MilkOpenFolder,
+    MilkRescan,
+    /// Navigateur de skins (Alt+S).
+    ToggleSkins,
 }
 
 /// Les menus surgissants.
@@ -115,4 +135,6 @@ pub enum Popup {
     PlMisc,
     /// Clic droit dans la liste.
     PlContext,
+    /// Clic droit dans la fenêtre de visualisation.
+    Milk,
 }

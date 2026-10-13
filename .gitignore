@@ -3,6 +3,8 @@
 !/dist/.gitkeep
 *.wsz
 *.milk
+# Presets originaux d'Alpagamp (licence MIT), intégrés au moteur.
+!/crates/milkdrop/presets/*.milk
 *.mp3
 *.flac
 *.ogg

@@ -15,6 +15,8 @@ pub enum Focus {
     Main,
     Eq,
     Playlist,
+    /// Fenêtre de visualisation : touches de MilkDrop (Espace, H, Retour arrière, R, L, Arrêt défil…).
+    Milk,
 }
 
 /// La touche « Ctrl » de Winamp : Cmd sur macOS.
@@ -64,6 +66,34 @@ pub fn map(ev: &KeyEvent, m: ModifiersState, focus: Focus) -> Option<Command> {
         }
     }
     let key = bare_key(ev);
+    // Touches de la visualisation (celles de MilkDrop).
+    if focus == Focus::Milk && !ctrl {
+        let v = match &key {
+            Key::Named(NamedKey::Space) => Some(MilkNext(false)),
+            Key::Named(NamedKey::Backspace) => Some(MilkPrevious),
+            Key::Named(NamedKey::ScrollLock) => Some(MilkToggleLock),
+            Key::Named(NamedKey::Enter) => Some(MilkFullscreen),
+            Key::Named(NamedKey::Escape) => Some(MilkLeaveFullscreen),
+            Key::Named(NamedKey::F11) => Some(MilkFullscreen),
+            Key::Character(c) if !alt => match c.to_lowercase().as_str() {
+                "h" => Some(MilkNext(true)),
+                "r" => Some(MilkToggleShuffle),
+                "k" => Some(MilkToggleLock),
+                "l" => Some(MilkPresets),
+                "f" => Some(MilkFullscreen),
+                _ => None,
+            },
+            _ => None,
+        };
+        if v.is_some() {
+            return v;
+        }
+    }
+    if let Key::Named(NamedKey::Enter) = &key {
+        if alt && focus == Focus::Milk {
+            return Some(MilkFullscreen);
+        }
+    }
     // Touches propres à la playlist.
     if focus == Focus::Playlist {
         let pl = match &key {
@@ -121,10 +151,12 @@ pub fn map(ev: &KeyEvent, m: ModifiersState, focus: Focus) -> Option<Command> {
                 ("r", false, false, false) => Some(ToggleRepeat),
                 ("r", false, true, false) => Some(ToggleManualAdvance),
                 ("s", false, false, false) => Some(ToggleShuffle),
-                ("s", false, false, true) => Some(LoadSkin),
+                ("s", false, false, true) => Some(ToggleSkins),
                 ("g", false, false, true) => Some(ToggleEqWindow),
                 ("e", false, false, true) => Some(TogglePlaylistWindow),
                 ("l", false, false, true) => Some(ToggleLibrary),
+                ("k", true, true, false) => Some(ToggleMilk),
+                ("k", false, false, true) => Some(MilkPresets),
                 ("b", true, false, true) => Some(AddBookmark),
                 ("d", true, false, false) => Some(ToggleDoubleSize),
                 ("t", true, false, false) => Some(ToggleTimeMode),

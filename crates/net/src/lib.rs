@@ -317,6 +317,42 @@ pub fn fetch(url: &str, req: &Request) -> Result<(Response, Vec<u8>), NetError> 
     Ok((resp, body))
 }
 
+/// Télécharge `url` dans le fichier `dest` (écrit à côté puis renommé), en signalant la progression
+/// (octets reçus, taille annoncée). `cancel` interrompt le téléchargement.
+pub fn download(url: &str, dest: &std::path::Path, mut progress: impl FnMut(u64, Option<u64>), cancel: &std::sync::atomic::AtomicBool) -> Result<(), NetError> {
+    let u = Url::parse(url)?;
+    let (_, resp, mut conn) = send(&u, &Request::get())?;
+    if resp.status != 200 {
+        return Err(NetError(format!("le serveur répond {}", resp.status)));
+    }
+    let total = resp.header("content-length").and_then(|v| v.parse::<u64>().ok());
+    let part = dest.with_extension("part");
+    let mut file = std::fs::File::create(&part).map_err(|e| NetError(format!("{} : {e}", part.display())))?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut done = 0u64;
+    loop {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            drop(file);
+            let _ = std::fs::remove_file(&part);
+            return Err(NetError("téléchargement annulé".into()));
+        }
+        let n = match conn.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(NetError(format!("lecture : {e}"))),
+        };
+        file.write_all(&buf[..n]).map_err(|e| NetError(format!("écriture : {e}")))?;
+        done += n as u64;
+        progress(done, total);
+    }
+    if total.is_some_and(|t| t != done) {
+        return Err(NetError("téléchargement incomplet".into()));
+    }
+    drop(file);
+    std::fs::rename(&part, dest).map_err(|e| NetError(format!("{} : {e}", dest.display())))
+}
+
 /// Encode une valeur pour une requête (`application/x-www-form-urlencoded`, paramètres d'URL).
 pub fn form_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

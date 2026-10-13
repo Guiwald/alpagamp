@@ -7,17 +7,21 @@ pub mod library_window;
 pub mod main_window;
 pub mod marquee;
 pub mod menu_window;
+pub mod milk_window;
 pub mod paint;
 pub mod playlist_window;
+pub mod skins_window;
 pub mod text;
 pub mod vis;
 
 pub use eq_window::{EqView, EqWindow};
-pub use gen_window::{GenKey, GenKind, GenView, GenWindow};
+pub use gen_window::{GenKey, GenKind, GenList, GenView, GenWindow};
 pub use library_window::{LibTab, LibraryAction, LibraryView, LibraryWindow};
 pub use main_window::{MainView, MainWindow};
 pub use menu_window::{MenuItem, MenuResult, MenuWindow};
+pub use milk_window::{MilkView, MilkWindow};
 pub use playlist_window::{PlMenuItem, PlaylistView, PlaylistWindow};
+pub use skins_window::{SkinRow, SkinsAction, SkinsTab, SkinsView, SkinsWindow};
 
 /// État du transport tel qu'affiché.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -91,6 +95,15 @@ pub enum Action {
     SubmitUrl(String),
     /// Bibliothèque (Spotify, radios).
     Library(LibraryAction),
+    // --- Visualisation ---
+    /// Afficher le preset `i` (« Choisir un preset »).
+    SelectPreset(usize),
+    /// Nouvelle taille de la fenêtre de visualisation (pixels skin).
+    MilkResize(u32, u32),
+    /// Plein écran (double-clic dans l'image).
+    MilkFullscreen,
+    /// Navigateur de skins.
+    Skins(SkinsAction),
 }
 
 #[cfg(test)]

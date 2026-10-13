@@ -1,5 +1,8 @@
-//! L'application de bureau : les quatre fenêtres (principale, égaliseur, playlist, fenêtre générique), leurs
-//! événements, l'aimantation et les commandes.
+//! L'application de bureau : les fenêtres (principale, égaliseur, playlist, fenêtre générique, Bibliothèque,
+//! visualisation), leurs événements, l'aimantation et les commandes.
+
+mod milk;
+mod skins;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,7 +20,7 @@ use alpagamp_audio::Media;
 use alpagamp_core::library::{LibraryItem, LibraryKind};
 use alpagamp_spotify::{ConnectCommand, LibraryRequest, Spotify, Status as SpotifyStatus};
 use alpagamp_ui::{
-    Action, EqView, EqWindow, GenKind, GenView, GenWindow, LibTab, LibraryAction, LibraryView, LibraryWindow, MainWindow, Mods, PlMenuItem,
+    Action, EqView, EqWindow, GenKind, GenList, GenView, GenWindow, LibTab, LibraryAction, LibraryView, LibraryWindow, MainWindow, Mods, PlMenuItem,
     PlaylistView, PlaylistWindow,
 };
 use winit::application::ApplicationHandler;
@@ -35,6 +38,9 @@ use crate::paths::Paths;
 use alpagamp_player::Player;
 use crate::window::{SkinWindow, WindowOptions};
 
+/// Bouton « Ouvrir… » du navigateur de skins (boîte de dialogue native : Mac et Windows).
+const SKINS_OPEN: bool = cfg!(any(target_os = "macos", target_os = "windows"));
+
 /// Distance d'aimantation, en pixels skin.
 const SNAP: i32 = 10;
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -46,9 +52,13 @@ pub enum Kind {
     Playlist = 2,
     Gen = 3,
     Library = 4,
+    /// Visualisation (presets MilkDrop), présentée par le GPU.
+    Vis = 5,
+    /// Navigateur de skins.
+    Skins = 6,
 }
 
-const KINDS: [Kind; 5] = [Kind::Main, Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library];
+const KINDS: [Kind; 7] = [Kind::Main, Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library, Kind::Vis, Kind::Skins];
 
 /// Une fenêtre système et son état.
 struct Slot {
@@ -85,12 +95,14 @@ pub struct App {
     player: Player,
     default_skin: Skin,
     skin: Skin,
-    slots: [Slot; 5],
+    slots: [Slot; 7],
     main_ui: MainWindow,
     eq_ui: EqWindow,
     pl_ui: PlaylistWindow,
     gen_ui: GenWindow,
     lib_ui: LibraryWindow,
+    milk: milk::MilkState,
+    skins: alpagamp_museum::Browser,
     spotify: Arc<Spotify>,
     /// Requête de bibliothèque attendue pour la vue affichée.
     lib_pending: Option<u64>,
@@ -153,13 +165,20 @@ impl App {
             Slot::new(s.playlist_window.map(|w| w.open).unwrap_or(true), pos(s.playlist_window)),
             Slot::new(false, None),
             Slot::new(false, None),
+            Slot::new(s.milkdrop.window.map(|w| w.open).unwrap_or(false), s.milkdrop.window.map(|w| (w.x, w.y))),
+            Slot::new(false, None),
         ];
+        let milk = match s.milkdrop.window {
+            Some(w) if w.w > 0 && w.h > 0 => milk::MilkState::new(w.w, w.h),
+            _ => milk::MilkState::new(275, 232),
+        };
         let spotify = Arc::new(Spotify::new(paths.config_dir.join("spotify"), device_name(), false, Box::new(crate::dialogs::open_url)));
         let sp = spotify.clone();
         player.resolver = Some(Box::new(move |src: &Source| match src {
             Source::Spotify(uri) => Some(Media::Custom(sp.opener(uri))),
             _ => None,
         }));
+        let skins = skins::new_browser(paths.skins_dir.clone());
         App {
             paths,
             player,
@@ -171,6 +190,8 @@ impl App {
             pl_ui,
             gen_ui: GenWindow::new(GenKind::Jump),
             lib_ui: LibraryWindow::default(),
+            milk,
+            skins,
             spotify,
             lib_pending: None,
             enqueue_pending: None,
@@ -220,6 +241,8 @@ impl App {
             Kind::Playlist => self.pl_ui.size(),
             Kind::Gen => self.gen_ui.size(),
             Kind::Library => self.lib_ui.size(),
+            Kind::Vis => self.milk.ui.size(),
+            Kind::Skins => self.skins.ui.size(),
         }
     }
 
@@ -234,9 +257,12 @@ impl App {
             Kind::Eq => format!("Alpagamp – {}", t("menu.equalizer")),
             Kind::Playlist => format!("Alpagamp – {}", t("menu.playlist_editor")),
             Kind::Library => format!("Alpagamp – {}", t("menu.library")),
+            Kind::Vis => format!("Alpagamp – {}", t("milk.title")),
+            Kind::Skins => format!("Alpagamp – {}", t("skins.title")),
             Kind::Gen => match self.gen_ui.kind {
                 GenKind::Jump => format!("Alpagamp – {}", t("jump.title")),
                 GenKind::AddUrl => format!("Alpagamp – {}", t("url.title")),
+                GenKind::Presets => format!("Alpagamp – {}", t("milk.presets")),
             },
         }
     }
@@ -292,6 +318,7 @@ impl App {
             double: self.double_for(k),
             secondary: k != Kind::Main,
             owner: owner.as_deref(),
+            gpu: k == Kind::Vis,
         };
         match SkinWindow::new(event_loop, opts) {
             Ok(w) => {
@@ -318,9 +345,15 @@ impl App {
                 y += w.phys_size().1;
             }
         }
-        if matches!(k, Kind::Gen | Kind::Library) {
+        if matches!(k, Kind::Gen | Kind::Library | Kind::Vis | Kind::Skins) {
+            // La fenêtre générique se met à droite de la visualisation si elle est ouverte.
+            if k == Kind::Gen {
+                if let (true, Some((vx, vy)), Some(vw)) = (self.slot(Kind::Vis).visible(), self.slot(Kind::Vis).pos, self.slot(Kind::Vis).win.as_ref()) {
+                    return Some((vx + vw.phys_size().0 + 10, vy));
+                }
+            }
             let w = mw.phys_size().0;
-            return Some((mx + w + if k == Kind::Gen { 20 } else { 0 }, my));
+            return Some((mx + w + if matches!(k, Kind::Library | Kind::Skins) { 0 } else { 20 }, my));
         }
         Some((mx, y))
     }
@@ -396,6 +429,8 @@ impl App {
             bookmarks: self.bookmarks.iter().map(|e| e.display_title()).collect(),
             library_open: self.slot(Kind::Library).open,
             spotify_connected: self.spotify.is_connected(),
+            milk_open: self.slot(Kind::Vis).open,
+            pack_installed: alpagamp_milkdrop::pack::installed(&self.paths.presets_dir) || self.milk.pack.busy(),
         }
     }
 
@@ -418,6 +453,7 @@ impl App {
 
     fn save(&mut self) {
         let state = |s: &Slot, shade: bool, size: (u32, u32)| s.pos.map(|(x, y)| WindowState { x, y, open: s.open, shade, w: size.0, h: size.1 });
+        let milk_full = self.milk_fullscreen_now();
         let st = &mut self.player.settings;
         if let Some(w) = state(&self.slots[0], self.main_ui.shade, (275, 116)) {
             st.main_window = Some(w);
@@ -431,6 +467,13 @@ impl App {
             st.playlist_window = Some(w);
         } else if let Some(w) = st.playlist_window.as_mut() {
             w.open = self.slots[2].open;
+        }
+        if !milk_full {
+            if let Some(w) = state(&self.slots[5], false, self.milk.ui.size()) {
+                st.milkdrop.window = Some(w);
+            } else if let Some(w) = st.milkdrop.window.as_mut() {
+                w.open = self.slots[5].open;
+            }
         }
         st.resume_index = self.player.playlist.current();
         if let Err(e) = st.save(&self.paths.settings) {
@@ -517,6 +560,8 @@ impl App {
                     self.set_open(from, false, event_loop);
                     return;
                 }
+                Kind::Vis => C::ToggleMilk,
+                Kind::Skins => C::ToggleSkins,
             },
             Action::Minimize => C::Minimize,
             Action::ToggleShade => {
@@ -532,7 +577,7 @@ impl App {
             Action::ToggleDoubleSize => C::ToggleDoubleSize,
             Action::ToggleTimeMode => C::ToggleTimeMode,
             Action::CycleVisMode => C::Vis(self.player.settings.vis.mode.cycle()),
-            Action::ToggleVisPlugin => return,
+            Action::ToggleVisPlugin => C::ToggleMilk,
             Action::StartMove => {
                 self.start_move(from);
                 return;
@@ -612,6 +657,21 @@ impl App {
                 self.library_action(la);
                 return;
             }
+            Action::SelectPreset(i) => {
+                if let Some(md) = self.milk.engine.as_mut() {
+                    md.select(i, false);
+                }
+                return;
+            }
+            Action::MilkResize(_, _) => {
+                self.relayout(Kind::Vis);
+                return;
+            }
+            Action::MilkFullscreen => C::MilkFullscreen,
+            Action::Skins(sa) => {
+                self.skins_action(sa, event_loop);
+                return;
+            }
             Action::SubmitUrl(url) => {
                 self.set_open(Kind::Gen, false, event_loop);
                 match Source::parse(&url, None) {
@@ -635,7 +695,7 @@ impl App {
             Kind::Main => self.main_ui.shade = !self.main_ui.shade,
             Kind::Eq => self.eq_ui.shade = !self.eq_ui.shade,
             Kind::Playlist => self.pl_ui.shade = !self.pl_ui.shade,
-            Kind::Gen | Kind::Library => return,
+            Kind::Gen | Kind::Library | Kind::Vis | Kind::Skins => return,
         }
         self.relayout(k);
     }
@@ -693,7 +753,12 @@ impl App {
             self.request_redraw();
             return;
         }
+        if self.milk_command(&cmd, event_loop) {
+            self.request_redraw();
+            return;
+        }
         match cmd {
+            ToggleSkins => self.skins_toggle(event_loop),
             ToggleLibrary => {
                 let open = !self.slot(Kind::Library).open;
                 self.set_open(Kind::Library, open, event_loop);
@@ -786,7 +851,7 @@ impl App {
                 }
             }
             ToggleShade => {
-                let k = self.focused.filter(|&k| !matches!(k, Kind::Gen | Kind::Library)).unwrap_or(Kind::Main);
+                let k = self.focused.filter(|&k| !matches!(k, Kind::Gen | Kind::Library | Kind::Vis | Kind::Skins)).unwrap_or(Kind::Main);
                 self.toggle_shade(k);
             }
             Vis(mode) => {
@@ -809,7 +874,8 @@ impl App {
                 event_loop.exit();
             }
             Minimize => {
-                for k in [Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library] {
+                self.milk_fullscreen(false);
+                for k in [Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library, Kind::Vis, Kind::Skins] {
                     if let (true, Some(w)) = (self.slot(k).open, &self.slot(k).win) {
                         w.window.set_visible(false);
                     }
@@ -1013,6 +1079,9 @@ impl App {
             VisPeakFalloff(v) => self.player.settings.vis.peak_falloff = v.min(4),
             VisScopeStyle(st) => self.player.settings.vis.scope_style = st,
             VisRefresh(v) => self.player.settings.vis.refresh = v.min(3),
+            // Traitées par `milk_command`.
+            ToggleMilk | MilkNext(_) | MilkPrevious | MilkToggleShuffle | MilkToggleLock | MilkPresets | MilkFullscreen
+            | MilkLeaveFullscreen | MilkAuto(_) | MilkBlend(_) | MilkDownloadPack | MilkOpenFolder | MilkRescan => {}
         }
         self.menus_dirty = true;
         self.request_redraw();
@@ -1062,6 +1131,12 @@ impl App {
         }
         let size = g.size();
         self.gen_ui = g;
+        if kind == GenKind::Presets && !self.slot(Kind::Gen).open {
+            let p = self.default_position(Kind::Gen);
+            if let Some((x, y)) = p {
+                self.set_pos(Kind::Gen, x, y);
+            }
+        }
         let title = self.title_for(Kind::Gen);
         if let Some(w) = self.slot_mut(Kind::Gen).win.as_mut() {
             w.set_geometry(size, false);
@@ -1336,8 +1411,13 @@ impl App {
                 let (title, prompt, ok, cancel) = match self.gen_ui.kind {
                     GenKind::Jump => (t("jump.title"), t("jump.prompt"), t("pl.play_item"), t("dialog.close")),
                     GenKind::AddUrl => (t("url.title"), t("url.prompt"), t("dialog.ok"), t("dialog.cancel")),
+                    GenKind::Presets => (t("milk.presets"), t("milk.search"), t("milk.show"), t("dialog.close")),
                 };
-                let view = GenView { entries: self.player.playlist.entries(), active, title, prompt, ok_label: ok, cancel_label: cancel };
+                let list = match self.gen_ui.kind {
+                    GenKind::Presets => GenList::Items(&self.milk.items),
+                    _ => GenList::Entries(self.player.playlist.entries()),
+                };
+                let view = GenView { list, active, title, prompt, ok_label: ok, cancel_label: cancel };
                 let s = &mut self.slots[3];
                 self.gen_ui.render(&mut s.fb, &self.skin, &view);
                 if let Some(w) = s.win.as_mut() {
@@ -1363,7 +1443,13 @@ impl App {
                     w.present(&s.fb, &self.lib_ui.text);
                 }
             }
+            Kind::Vis => self.milk_redraw(),
+            Kind::Skins => self.skins_redraw(),
         }
+    }
+
+    fn milk_fullscreen_now(&self) -> bool {
+        milk::MilkState::fullscreen(self)
     }
 
     fn handle_dropped(&mut self) {
@@ -1397,6 +1483,11 @@ impl App {
             Kind::Main => {
                 let view = self.player.main_view(0);
                 let mut a = if double { self.main_ui.double_click(x, y, mods) } else { Vec::new() };
+                // Double-clic sur le visualiseur : trois changements de mode au total (aucun effet), et la
+                // fenêtre de visualisation s'ouvre.
+                if a.contains(&Action::ToggleVisPlugin) {
+                    a.insert(0, Action::CycleVisMode);
+                }
                 if a.is_empty() {
                     a = self.main_ui.mouse_down(x, y, mods, &view);
                 }
@@ -1436,6 +1527,18 @@ impl App {
                 }
                 a
             }
+            // Plein écran : seul le double-clic compte (pour en sortir).
+            Kind::Vis if self.milk_fullscreen_now() => {
+                if double { vec![Action::MilkFullscreen] } else { Vec::new() }
+            }
+            Kind::Vis => {
+                let mut a = if double { self.milk.ui.double_click(x, y) } else { Vec::new() };
+                if a.is_empty() {
+                    a = self.milk.ui.mouse_down(x, y);
+                }
+                a
+            }
+            Kind::Skins => self.skins.ui.mouse_down(x, y, SKINS_OPEN),
         };
         for a in actions {
             self.action(k, a, event_loop);
@@ -1463,6 +1566,8 @@ impl App {
             Kind::Playlist => self.pl_ui.mouse_up(x, y, mods),
             Kind::Gen => self.gen_ui.mouse_up(x, y),
             Kind::Library => self.lib_ui.mouse_up(x, y),
+            Kind::Vis => self.milk.ui.mouse_up(x, y),
+            Kind::Skins => self.skins.ui.mouse_up(x, y, SKINS_OPEN),
         };
         for a in actions {
             self.action(k, a, event_loop);
@@ -1492,6 +1597,11 @@ impl App {
                 self.lib_ui.mouse_move(x, y);
                 Vec::new()
             }
+            Kind::Vis => self.milk.ui.mouse_move(x, y),
+            Kind::Skins => {
+                self.skins.ui.mouse_move(x, y, SKINS_OPEN);
+                Vec::new()
+            }
         };
         for a in actions {
             self.action(k, a, event_loop);
@@ -1499,7 +1609,7 @@ impl App {
     }
 
     fn is_dragging(&self) -> bool {
-        self.moving.is_some() || self.main_ui.is_dragging() || self.eq_ui.is_dragging() || self.pl_ui.is_dragging() || self.gen_ui.is_dragging() || self.lib_ui.is_dragging()
+        self.moving.is_some() || self.main_ui.is_dragging() || self.eq_ui.is_dragging() || self.pl_ui.is_dragging() || self.gen_ui.is_dragging() || self.lib_ui.is_dragging() || self.milk.ui.is_dragging() || self.skins.ui.is_dragging()
     }
 
     /// Ouvre les fenêtres au démarrage.
@@ -1530,6 +1640,10 @@ impl App {
                 }
                 self.create_window(k, event_loop);
             }
+        }
+        if self.slot(Kind::Vis).open {
+            self.slot_mut(Kind::Vis).open = false;
+            self.milk_set_open(true, event_loop);
         }
         if let Some(w) = &self.slot(Kind::Main).win {
             w.window.focus_window();
@@ -1592,7 +1706,7 @@ impl ApplicationHandler for App {
                     self.focused = Some(k);
                     if k == Kind::Main && self.hidden_by_minimize {
                         self.hidden_by_minimize = false;
-                        for o in [Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library] {
+                        for o in [Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library, Kind::Vis, Kind::Skins] {
                             if let (true, Some(w)) = (self.slot(o).open, &self.slot(o).win) {
                                 w.window.set_visible(true);
                             }
@@ -1604,9 +1718,14 @@ impl ApplicationHandler for App {
                 self.request_redraw();
             }
             WindowEvent::Moved(p) => {
-                // Position réelle (déplacement par le système, ou confirmation du nôtre).
-                if self.moving.is_none() {
+                // Position réelle (déplacement par le système, ou confirmation du nôtre) ; pas en plein écran.
+                if self.moving.is_none() && !(k == Kind::Vis && self.milk_fullscreen_now()) {
                     self.slot_mut(k).pos = Some((p.x, p.y));
+                }
+            }
+            WindowEvent::Resized(_) if k == Kind::Vis => {
+                if let Some(w) = &self.slot(k).win {
+                    w.window.request_redraw();
                 }
             }
             WindowEvent::ScaleFactorChanged { .. } => {
@@ -1634,7 +1753,9 @@ impl ApplicationHandler for App {
                 self.request_redraw();
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Right, .. } => {
-                let which = if k == Kind::Playlist && !self.pl_ui.shade {
+                let which = if k == Kind::Vis {
+                    Popup::Milk
+                } else if k == Kind::Playlist && !self.pl_ui.shade {
                     let (cx, cy) = self.slot(k).cursor;
                     let (x, y) = self.slot(k).win.as_ref().map(|w| w.to_skin(cx, cy)).unwrap_or((0, 0));
                     // Clic droit sur une ligne : la sélectionner si elle ne l'est pas, puis menu de la liste.
@@ -1667,13 +1788,23 @@ impl ApplicationHandler for App {
                         Kind::Playlist => self.pl_ui.wheel(lines),
                         Kind::Gen => self.gen_ui.wheel(lines),
                         Kind::Library => self.lib_ui.wheel(lines),
-                        Kind::Eq => {}
+                        Kind::Skins => self.skins.ui.wheel(lines),
+                        Kind::Eq | Kind::Vis => {}
                     }
                     self.request_redraw();
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state != ElementState::Pressed {
+                    return;
+                }
+                if k == Kind::Skins {
+                    if let Some(gk) = keys::gen_key(&event, self.mods) {
+                        for a in self.skins.ui.key(gk) {
+                            self.action(Kind::Skins, a, event_loop);
+                        }
+                        self.request_redraw();
+                    }
                     return;
                 }
                 if k == Kind::Library {
@@ -1691,8 +1822,13 @@ impl ApplicationHandler for App {
                             self.action(Kind::Gen, a, event_loop);
                         }
                         if self.gen_ui.take_query_changed() {
-                            let r = self.player.playlist.search(&self.gen_ui.query);
-                            self.gen_ui.set_results(r);
+                            if self.gen_ui.kind == GenKind::Presets {
+                                let q = self.gen_ui.query.clone();
+                                self.milk_search(&q);
+                            } else {
+                                let r = self.player.playlist.search(&self.gen_ui.query);
+                                self.gen_ui.set_results(r);
+                            }
                         }
                         self.request_redraw();
                     }
@@ -1701,6 +1837,7 @@ impl ApplicationHandler for App {
                 let focus = match k {
                     Kind::Playlist => Focus::Playlist,
                     Kind::Eq => Focus::Eq,
+                    Kind::Vis => Focus::Milk,
                     _ => Focus::Main,
                 };
                 if let Some(c) = keys::map(&event, self.mods, focus) {
@@ -1722,6 +1859,8 @@ impl ApplicationHandler for App {
             }
         }
         self.spotify_events();
+        self.milk_tick();
+        self.skins_tick(event_loop);
         self.player.tick();
         if self.player.take_track_changed().is_some() {
             self.apply_auto_preset();
@@ -1751,7 +1890,8 @@ impl ApplicationHandler for App {
         // seule fenêtre recevrait ses WM_PAINT).
         let now = Instant::now();
         let playing = self.player.state() == PlayState::Playing;
-        let interval = Duration::from_millis(if playing || self.is_dragging() { 16 } else { 100 });
+        let milk_visible = self.slot(Kind::Vis).visible() && self.milk.engine.is_some();
+        let interval = Duration::from_millis(if playing || milk_visible || self.is_dragging() { 16 } else { 100 });
         if now >= self.next_frame {
             let dt = (now - self.last_frame).as_secs_f32().min(0.25);
             self.last_frame = now;

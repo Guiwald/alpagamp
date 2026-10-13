@@ -326,6 +326,17 @@ impl Engine {
         }
         self.shared.vis.lock().latest(left, right);
     }
+
+    /// Échantillons joués depuis le dernier appel (stéréo entrelacée, pour MilkDrop) ; rien en pause.
+    pub fn vis_since(&self, cursor: &mut u64, out: &mut Vec<f32>) {
+        let playing = self.timeline.lock().state == PlayState::Playing;
+        let vis = self.shared.vis.lock();
+        if !playing {
+            *cursor = vis.total;
+            return;
+        }
+        vis.since(cursor, out);
+    }
 }
 
 impl Default for Engine {

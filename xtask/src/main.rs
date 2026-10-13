@@ -184,7 +184,7 @@ fn render_windows(out: Option<PathBuf>, wsz: Option<PathBuf>) -> Res {
     let mut g = alpagamp_ui::GenWindow::new(alpagamp_ui::GenKind::Jump);
     g.key(alpagamp_ui::GenKey::Text("an".into()));
     g.set_results(vec![1, 4]);
-    let gv = alpagamp_ui::GenView { entries: &entries, active: true, title: "Aller au morceau", prompt: "Rechercher :", ok_label: "Lire", cancel_label: "Fermer" };
+    let gv = alpagamp_ui::GenView { list: alpagamp_ui::GenList::Entries(&entries), active: true, title: "Aller au morceau", prompt: "Rechercher :", ok_label: "Lire", cancel_label: "Fermer" };
     let mut fg = Image::new(1, 1, 0);
     g.render(&mut fg, &skin, &gv);
     let (gw, gh) = (fg.width * Z, fg.height * Z);

@@ -8,6 +8,8 @@ members = [
     "crates/net",
     "crates/spotify",
     "crates/player",
+    "crates/milkdrop",
+    "crates/museum",
     "app/desktop",
     "app/android",
     "xtask",
@@ -29,6 +31,8 @@ alpagamp-ui = { path = "crates/ui" }
 alpagamp-player = { path = "crates/player" }
 alpagamp-net = { path = "crates/net" }
 alpagamp-spotify = { path = "crates/spotify" }
+alpagamp-milkdrop = { path = "crates/milkdrop" }
+alpagamp-museum = { path = "crates/museum" }
 
 thiserror = "2"
 log = "0.4"

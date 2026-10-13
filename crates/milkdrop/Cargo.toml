@@ -1,0 +1,22 @@
+[package]
+name = "alpagamp-milkdrop"
+version = "0.4.0"
+description = "MilkDrop dans Alpagamp : moteur lactea derrière une interface, présentation wgpu, presets et pack à télécharger"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alpagamp-net.workspace = true
+log.workspace = true
+zip.workspace = true
+fastrand = "2"
+pollster = "0.4"
+raw-window-handle = "0.6"
+# Moteur MilkDrop (ADR 0019) : version figée.
+lactea = "=0.2.1"
+# Pas de compilation C/C++ : Metal (macOS/iOS), Vulkan (Android, Linux, Windows), DX12 (Windows).
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "vulkan", "dx12"] }
+
+[dev-dependencies]
+png.workspace = true

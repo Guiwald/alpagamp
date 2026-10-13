@@ -108,6 +108,32 @@ impl Default for PlaybackSettings {
     }
 }
 
+/// Fenêtre de visualisation (presets MilkDrop).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MilkSettings {
+    /// Secondes entre deux changements automatiques de preset (0 = jamais).
+    pub auto_secs: u32,
+    /// Durée du fondu entre deux presets, en dixièmes de seconde (0 = coupe franche).
+    pub blend_tenths: u32,
+    /// Presets dans le désordre.
+    pub shuffle: bool,
+    /// Garder le preset affiché.
+    pub locked: bool,
+    /// Dernier preset affiché (dossier/nom).
+    pub last_preset: Option<String>,
+    pub window: Option<WindowState>,
+    /// Téléphone : tout l'écran est composé par la carte graphique (nécessaire à la visualisation). Désactivable
+    /// en cas de souci d'affichage.
+    pub gpu: bool,
+}
+
+impl Default for MilkSettings {
+    fn default() -> Self {
+        Self { auto_secs: 20, blend_tenths: 27, shuffle: true, locked: false, last_preset: None, window: None, gpu: true }
+    }
+}
+
 /// Position et état d'une fenêtre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowState {
@@ -138,6 +164,7 @@ pub struct Settings {
     pub eq: EqSettings,
     pub vis: VisSettings,
     pub playback: PlaybackSettings,
+    pub milkdrop: MilkSettings,
     pub main_window: Option<WindowState>,
     pub eq_window: Option<WindowState>,
     pub playlist_window: Option<WindowState>,
@@ -164,6 +191,7 @@ impl Default for Settings {
             eq: EqSettings::default(),
             vis: VisSettings::default(),
             playback: PlaybackSettings::default(),
+            milkdrop: MilkSettings::default(),
             main_window: None,
             eq_window: None,
             playlist_window: None,
@@ -209,6 +237,8 @@ mod tests {
         let mut s = Settings::default();
         s.volume = 123;
         s.vis.mode = VisMode::Oscilloscope;
+        s.milkdrop.last_preset = Some("Dancer/Comet/x".into());
+        s.milkdrop.window = Some(WindowState { x: 1, y: 2, open: true, shade: false, w: 300, h: 232 });
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, "volume = 7\n").unwrap();

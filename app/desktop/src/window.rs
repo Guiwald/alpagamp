@@ -1,5 +1,6 @@
 //! Une fenêtre système sans bordure qui affiche une image skin agrandie au pixel près, plus le texte vectoriel
-//! dessiné à la résolution de l'écran.
+//! dessiné à la résolution de l'écran. La fenêtre de visualisation est présentée par le GPU (wgpu) au lieu de
+//! softbuffer, et peut passer en plein écran.
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -12,8 +13,12 @@ use winit::window::{Window, WindowAttributes, WindowLevel};
 
 pub struct SkinWindow {
     pub window: Rc<Window>,
-    surface: softbuffer::Surface<Rc<Window>, Rc<Window>>,
-    _context: softbuffer::Context<Rc<Window>>,
+    /// Surface CPU (toutes les fenêtres sauf la visualisation).
+    soft: Option<(softbuffer::Surface<Rc<Window>, Rc<Window>>, softbuffer::Context<Rc<Window>>)>,
+    /// Surface GPU (visualisation), créée par l'application.
+    pub gpu: Option<alpagamp_milkdrop::Presenter>,
+    /// En plein écran, la taille est celle de l'écran et non celle du skin.
+    pub fullscreen: bool,
     /// Facteur d'agrandissement entier (double taille × échelle de l'écran).
     pub zoom: u32,
     /// Taille en pixels skin.
@@ -32,6 +37,8 @@ pub struct WindowOptions<'a> {
     pub secondary: bool,
     /// Fenêtre propriétaire (Windows) : les fenêtres secondaires suivent la principale (réduction, ordre).
     pub owner: Option<&'a Window>,
+    /// Présentée par le GPU (pas de surface CPU).
+    pub gpu: bool,
 }
 
 impl SkinWindow {
@@ -69,9 +76,14 @@ impl SkinWindow {
             attrs = attrs.with_window_icon(Some(i));
         }
         let window = Rc::new(event_loop.create_window(attrs).map_err(|e| e.to_string())?);
-        let context = softbuffer::Context::new(window.clone()).map_err(|e| e.to_string())?;
-        let surface = softbuffer::Surface::new(&context, window.clone()).map_err(|e| e.to_string())?;
-        let mut w = SkinWindow { window, surface, _context: context, zoom: 1, skin_size: o.skin_size, double: o.double };
+        let soft = if o.gpu {
+            None
+        } else {
+            let context = softbuffer::Context::new(window.clone()).map_err(|e| e.to_string())?;
+            let surface = softbuffer::Surface::new(&context, window.clone()).map_err(|e| e.to_string())?;
+            Some((surface, context))
+        };
+        let mut w = SkinWindow { window, soft, gpu: None, fullscreen: false, zoom: 1, skin_size: o.skin_size, double: o.double };
         w.zoom = w.zoom_for(o.double);
         w.apply_size();
         w.window.set_visible(true);
@@ -91,7 +103,29 @@ impl SkinWindow {
     }
 
     pub fn phys_size(&self) -> (i32, i32) {
+        if self.fullscreen {
+            let s = self.window.inner_size();
+            return (s.width as i32, s.height as i32);
+        }
         ((self.skin_size.0 * self.zoom) as i32, (self.skin_size.1 * self.zoom) as i32)
+    }
+
+    /// Passe en plein écran (sans bordure, sur l'écran courant) ou en revient.
+    pub fn set_fullscreen(&mut self, on: bool) {
+        self.fullscreen = on;
+        if on {
+            // Une fenêtre de taille fixe ne peut pas être agrandie par le système (indications de taille min/max).
+            // (winit/X11 retient la taille de création comme minimum et maximum : on les efface.)
+            self.window.set_min_inner_size(None::<PhysicalSize<u32>>);
+            self.window.set_max_inner_size(None::<PhysicalSize<u32>>);
+            self.window.set_resizable(true);
+            self.window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+        } else {
+            self.window.set_fullscreen(None);
+            self.window.set_resizable(false);
+            self.apply_size();
+        }
+        self.window.request_redraw();
     }
 
     /// Change la taille skin et/ou le mode double taille.
@@ -112,10 +146,13 @@ impl SkinWindow {
     }
 
     fn apply_size(&mut self) {
+        if self.fullscreen {
+            return;
+        }
         let (w, h) = (self.skin_size.0 * self.zoom, self.skin_size.1 * self.zoom);
         let _ = self.window.request_inner_size(PhysicalSize::new(w, h));
-        if let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) {
-            let _ = self.surface.resize(nw, nh);
+        if let (Some(nw), Some(nh), Some((surface, _))) = (NonZeroU32::new(w), NonZeroU32::new(h), self.soft.as_mut()) {
+            let _ = surface.resize(nw, nh);
         }
         self.window.request_redraw();
     }
@@ -129,21 +166,45 @@ impl SkinWindow {
     pub fn present(&mut self, img: &Image, text: &[TextRun]) {
         let (bw, bh) = (self.skin_size.0 * self.zoom, self.skin_size.1 * self.zoom);
         let (Some(nw), Some(nh)) = (NonZeroU32::new(bw), NonZeroU32::new(bh)) else { return };
-        let _ = self.surface.resize(nw, nh);
-        let Ok(mut buf) = self.surface.buffer_mut() else { return };
-        let z = self.zoom.max(1);
-        for y in 0..bh {
-            let sy = (y / z).min(img.height.saturating_sub(1));
-            let src_row = &img.pixels[(sy * img.width) as usize..((sy + 1) * img.width) as usize];
-            let dst_row = &mut buf[(y * bw) as usize..((y + 1) * bw) as usize];
-            for (x, d) in dst_row.iter_mut().enumerate() {
-                let sx = (x as u32 / z).min(img.width.saturating_sub(1));
-                *d = src_row[sx as usize] & 0x00FF_FFFF;
-            }
-        }
+        let Some((surface, _)) = self.soft.as_mut() else { return };
+        let _ = surface.resize(nw, nh);
+        let Ok(mut buf) = surface.buffer_mut() else { return };
+        zoom_into(&mut buf, img, self.zoom.max(1), 0x00FF_FFFF);
         if !text.is_empty() {
-            draw_runs(&mut buf, bw, bh, z as f32, text);
+            draw_runs(&mut buf, bw, bh, self.zoom.max(1) as f32, text);
         }
         let _ = buf.present();
+    }
+}
+
+/// Agrandit `img` d'un facteur entier `z` dans `buf` (taille `img × z`), pixels masqués par `mask`.
+pub fn zoom_into(buf: &mut [u32], img: &Image, z: u32, mask: u32) {
+    let (bw, bh) = (img.width * z, img.height * z);
+    for y in 0..bh {
+        let sy = (y / z).min(img.height.saturating_sub(1));
+        let src_row = &img.pixels[(sy * img.width) as usize..((sy + 1) * img.width) as usize];
+        let dst_row = &mut buf[(y * bw) as usize..((y + 1) * bw) as usize];
+        for (x, d) in dst_row.iter_mut().enumerate() {
+            let sx = (x as u32 / z).min(img.width.saturating_sub(1));
+            *d = src_row[sx as usize] & mask;
+        }
+    }
+}
+
+/// Image agrandie avec son canal alpha, et son texte : un calque pour la composition GPU.
+pub fn zoomed_argb(img: &Image, z: u32, text: &[TextRun]) -> (u32, u32, Vec<u32>) {
+    let (bw, bh) = (img.width * z, img.height * z);
+    let mut buf = vec![0u32; (bw * bh) as usize];
+    zoom_into(&mut buf, img, z, 0xFFFF_FFFF);
+    if !text.is_empty() {
+        draw_runs(&mut buf, bw, bh, z as f32, text);
+    }
+    (bw, bh, buf)
+}
+
+impl Drop for SkinWindow {
+    fn drop(&mut self) {
+        // La surface GPU référence la fenêtre : elle part d'abord.
+        self.gpu.take();
     }
 }

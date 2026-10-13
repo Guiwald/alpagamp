@@ -6,6 +6,27 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+### Ajouté
+- Visualisation : fenêtre de visualisation (Ctrl+Maj+K, double-clic sur le visualiseur, menu Visualisation)
+  qui affiche les presets MilkDrop avec le moteur lactea ; cadre de skin redimensionnable, plein écran
+  (double-clic, Entrée, F11 ; Échap pour sortir), touches de MilkDrop (Espace : suivant avec fondu, H : coupe
+  franche, Retour arrière : précédent, R : ordre aléatoire, K ou Arrêt défil : verrou, L : choisir un preset),
+  changement automatique (10 s à 2 min) et durée du fondu réglables, nom du preset affiché à chaque changement.
+- Visualisation : six presets originaux intégrés ; « Télécharger le pack de presets » installe *Cream of the
+  Crop* (9 795 presets, 30 Mo environ) à la demande ; presets personnels dans le dossier des presets.
+- Visualisation : « Choisir un preset » (Alt+K, L) — recherche dans la liste, affichage en un double-clic.
+- Téléphone : visualisation en plein écran (menu › Visualisation, ou double-tap sur le visualiseur) : glisser
+  pour changer de preset, double-tap pour sortir, appui long pour son menu, bouton Retour.
+- Téléphone : l'écran est composé par la carte graphique (Vulkan), avec repli automatique sur l'affichage
+  logiciel ; option « Affichage par la carte graphique » pour le couper.
+- Audio : flux continu des échantillons joués pour les visualisations.
+- Réseau : téléchargement de fichiers avec progression.
+- Docs : ADR 0019 (lactea retenu après audit ; essai sur 200 presets) ; README pour tout le monde ; publication
+  sur GitHub (script, compilation automatique).
+
+### Corrigé
+- Fenêtres génériques : les titres accentués s'affichent (lettres sans accents de `gen.bmp`).
+
 ## [0.4.0] - 2026-10-13
 
 > Mise en service : Windows (`Alpagamp-0.4.0-windows-x64.zip`) — remplacer l'ancien dossier. Android

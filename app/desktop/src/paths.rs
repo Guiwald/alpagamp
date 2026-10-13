@@ -10,6 +10,8 @@ pub struct Paths {
     /// Préréglages d'égaliseur automatiques (un par morceau, au format bibliothèque `.eqf`).
     pub eq_auto: PathBuf,
     pub bookmarks: PathBuf,
+    /// Presets de visualisation : le pack téléchargé et ceux que l'on y dépose.
+    pub presets_dir: PathBuf,
 }
 
 impl Paths {
@@ -23,6 +25,7 @@ impl Paths {
             skins_dir: config_dir.join("skins"),
             eq_auto: config_dir.join("eq-auto.eqf"),
             bookmarks: config_dir.join("bookmarks.m3u8"),
+            presets_dir: config_dir.join("presets"),
             config_dir,
         }
     }

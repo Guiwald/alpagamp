@@ -22,6 +22,8 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 | **Skin par défaut** | Le skin original livré avec le lecteur (ADR 0001). |
 | **Sprite** | Un rectangle d'une planche BMP du skin, à coordonnées fixes. |
 | **Preset MilkDrop** | Un fichier `.milk` : réglages + code d'équations + shaders, rendu par le moteur MilkDrop. |
+| **Fenêtre de visualisation** | La fenêtre (Ctrl+Shift+K) qui affiche les presets MilkDrop ; plein écran par double-clic ou Alt+Entrée (ADR 0019). |
+| **lactea** | Le moteur MilkDrop en Rust (wgpu) utilisé derrière l'interface `Visualizer` (ADR 0019). |
 | **Preset AVS** | Un fichier `.avs` binaire (v2). |
 | **Preset d'EQ** | 10 bandes + préampli ; fichier `.eqf` ou bibliothèque. |
 | **Plugin** | Un module WebAssembly chargé par le lecteur (ADR 0003). Trois sortes : **visualisation**, **DSP** (effet audio), **général**. |

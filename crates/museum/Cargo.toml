@@ -1,0 +1,17 @@
+[package]
+name = "alpagamp-museum"
+version = "0.4.0"
+description = "Navigateur de skins : recherche, aperçus et téléchargement depuis le Winamp Skin Museum"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alpagamp-net.workspace = true
+alpagamp-skin.workspace = true
+log.workspace = true
+crossbeam-channel.workspace = true
+serde_json = "1"
+png.workspace = true
+alpagamp-core.workspace = true
+alpagamp-ui.workspace = true

@@ -15,7 +15,7 @@ effacée : sa fiche passe au statut « remplacée par ADR n » et reste là.
 | [0008](0008-depot-public-et-ci.md) | Dépôt public, compilation par GitHub Actions | acceptée |
 | [0009](0009-nom-alpagamp.md) | Le lecteur s'appelle Alpagamp | acceptée |
 | [0010](0010-choisir-sa-musique-spotify.md) | Choisir sa musique Spotify, sans configuration | acceptée |
-| [0011](0011-moteur-milkdrop.md) | Moteur MilkDrop : audit de lactea, sinon moteur maison | acceptée |
+| [0011](0011-moteur-milkdrop.md) | Moteur MilkDrop : audit de lactea, sinon moteur maison | acceptée (suite : 0019) |
 | [0012](0012-presets-et-skins-tiers.md) | Arrivée des presets et skins tiers | acceptée |
 | [0013](0013-plugins-d-exemple.md) | Plugins d'exemple | acceptée |
 | [0014](0014-langues-raccourcis-signature.md) | Langues, raccourcis Mac, mode adapté, signature | acceptée |
@@ -23,3 +23,4 @@ effacée : sa fiche passe au statut « remplacée par ADR n » et reste là.
 | [0016](0016-fenetres-et-formes.md) | Fenêtres : groupe aimanté, fenêtres génériques skinnées, formes reportées | acceptée |
 | [0017](0017-android-sans-java.md) | Android : NativeActivity sans Java, APK construit sans Gradle | acceptée |
 | [0018](0018-spotify-dans-le-moteur.md) | Spotify dans le moteur ; TLS de librespot (écart pour Android) | acceptée |
+| [0019](0019-lactea.md) | Moteur MilkDrop : lactea retenu après audit, composition GPU | acceptée |
