@@ -1,0 +1,187 @@
+//! Réglages persistants (fichier TOML dans le dossier de configuration de l'utilisateur).
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::eq::EqSettings;
+
+/// Mode du visualiseur intégré.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VisMode {
+    #[default]
+    Analyzer,
+    Oscilloscope,
+    Off,
+}
+
+impl VisMode {
+    /// Clic sur le visualiseur : Analyseur → Oscilloscope → Éteint → Analyseur.
+    pub fn cycle(self) -> VisMode {
+        match self {
+            VisMode::Analyzer => VisMode::Oscilloscope,
+            VisMode::Oscilloscope => VisMode::Off,
+            VisMode::Off => VisMode::Analyzer,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyzerStyle {
+    #[default]
+    Normal,
+    Fire,
+    Line,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeStyle {
+    Dots,
+    #[default]
+    Lines,
+    Solid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VisSettings {
+    pub mode: VisMode,
+    pub analyzer_style: AnalyzerStyle,
+    pub scope_style: ScopeStyle,
+    /// Barres épaisses (19) ou fines (75).
+    pub thick_bands: bool,
+    pub peaks: bool,
+    /// Vitesse de chute des barres (0 = lente … 4 = rapide).
+    pub falloff: u8,
+    /// Vitesse de chute des crêtes (0 … 4).
+    pub peak_falloff: u8,
+    /// Rafraîchissement : 0 = 70 i/s, 1 = 35, 2 = 18, 3 = 9.
+    pub refresh: u8,
+}
+
+impl Default for VisSettings {
+    fn default() -> Self {
+        Self {
+            mode: VisMode::Analyzer,
+            analyzer_style: AnalyzerStyle::Normal,
+            scope_style: ScopeStyle::Lines,
+            thick_bands: true,
+            peaks: true,
+            falloff: 2,
+            peak_falloff: 1,
+            refresh: 1,
+        }
+    }
+}
+
+/// Position et état d'une fenêtre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowState {
+    pub x: i32,
+    pub y: i32,
+    pub open: bool,
+    pub shade: bool,
+    /// Taille (playlist seulement), en pixels skin.
+    pub w: u32,
+    pub h: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Volume 0..=255 (défaut 200).
+    pub volume: u8,
+    /// Balance −127..=127.
+    pub balance: i8,
+    pub shuffle: bool,
+    pub repeat: bool,
+    pub manual_advance: bool,
+    pub time_remaining: bool,
+    pub double_size: bool,
+    pub always_on_top: bool,
+    /// Chemin du skin choisi (`None` = skin par défaut).
+    pub skin: Option<PathBuf>,
+    pub eq: EqSettings,
+    pub vis: VisSettings,
+    pub main_window: Option<WindowState>,
+    pub eq_window: Option<WindowState>,
+    pub playlist_window: Option<WindowState>,
+    /// Langue forcée (`None` = langue du système).
+    pub language: Option<String>,
+    /// Dernier dossier ouvert.
+    pub last_dir: Option<PathBuf>,
+    /// Morceau courant et position à la fermeture.
+    pub resume_index: Option<usize>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            volume: 200,
+            balance: 0,
+            shuffle: false,
+            repeat: false,
+            manual_advance: false,
+            time_remaining: false,
+            double_size: false,
+            always_on_top: false,
+            skin: None,
+            eq: EqSettings::default(),
+            vis: VisSettings::default(),
+            main_window: None,
+            eq_window: None,
+            playlist_window: None,
+            language: None,
+            last_dir: None,
+            resume_index: None,
+        }
+    }
+}
+
+impl Settings {
+    /// Charge les réglages ; renvoie les valeurs par défaut si le fichier manque ou est illisible.
+    pub fn load(path: &Path) -> Settings {
+        match std::fs::read_to_string(path) {
+            Ok(t) => toml::from_str(&t).unwrap_or_else(|e| {
+                log::warn!("réglages illisibles ({e}) : valeurs par défaut");
+                Settings::default()
+            }),
+            Err(_) => Settings::default(),
+        }
+    }
+
+    /// Enregistre de façon atomique (fichier temporaire puis renommage).
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(tmp, path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_and_partial_file() {
+        let dir = std::env::temp_dir().join(format!("alpagamp-test-{}", std::process::id()));
+        let path = dir.join("settings.toml");
+        let mut s = Settings::default();
+        s.volume = 123;
+        s.vis.mode = VisMode::Oscilloscope;
+        s.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), s);
+        std::fs::write(&path, "volume = 7\n").unwrap();
+        let p = Settings::load(&path);
+        assert_eq!(p.volume, 7);
+        assert_eq!(p.balance, 0);
+        std::fs::remove_dir_all(dir).ok();
+    }
+}
