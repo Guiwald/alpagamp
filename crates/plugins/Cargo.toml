@@ -1,0 +1,22 @@
+[package]
+name = "alpagamp-plugins"
+version = "0.5.0"
+description = "Hôte des plugins WebAssembly d'Alpagamp (API v1, ADR 0020) : visualisations, effets audio, plugins généraux"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alpagamp-core.workspace = true
+alpagamp-audio.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+rustfft.workspace = true
+serde.workspace = true
+serde_json = "1"
+# Interpréteur WebAssembly en Rust pur (marche aussi sans compilation à la volée : iOS). Modules validés.
+# Boucle d'exécution « portable » : la variante par appels terminaux peut faire déborder la pile sans optimisation.
+wasmi = { version = "2.0.0", default-features = false, features = ["std", "validate", "stable", "portable-dispatch"] }
+
+[dev-dependencies]
+wat = "1"

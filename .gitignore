@@ -1,4 +1,5 @@
 /target
+/plugin-examples/target
 /dist/*
 !/dist/.gitkeep
 *.wsz

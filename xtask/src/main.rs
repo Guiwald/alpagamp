@@ -21,9 +21,10 @@ fn main() {
         "render-main" => render_main(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
         "render-windows" => render_windows(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
         "apk" => apk::build_apk(),
+        "plugins" => plugins(),
         _ => {
             eprintln!(
-                "Commandes :\n  skin-sheets <dossier> [skin.wsz]       écrit chaque planche en PNG (×3)\n  export-default-skin <fichier.wsz>      exporte le skin par défaut\n  render-main <sortie.png> [skin.wsz]    aperçu de la fenêtre principale\n  render-windows <sortie.png> [skin.wsz] aperçu des trois fenêtres et de la fenêtre générique\n  icons <dossier>                        icônes PNG, .ico, .icns\n  dist-windows [alpagamp.exe]            paquet zip Windows dans dist/\n  bundle-mac <binaire> [dossier]         Alpagamp.app (+ .dmg sur macOS)\n  apk                                    APK Android signé dans dist/ (SDK, NDK)\n  changelog-page                         page HTML des versions dans dist/\n  bump patch|minor|major                 nouvelle version"
+                "Commandes :\n  skin-sheets <dossier> [skin.wsz]       écrit chaque planche en PNG (×3)\n  export-default-skin <fichier.wsz>      exporte le skin par défaut\n  render-main <sortie.png> [skin.wsz]    aperçu de la fenêtre principale\n  render-windows <sortie.png> [skin.wsz] aperçu des trois fenêtres et de la fenêtre générique\n  icons <dossier>                        icônes PNG, .ico, .icns\n  dist-windows [alpagamp.exe]            paquet zip Windows dans dist/\n  bundle-mac <binaire> [dossier]         Alpagamp.app (+ .dmg sur macOS)\n  apk                                    APK Android signé dans dist/ (SDK, NDK)\n  plugins                                plugins d'exemple en WebAssembly → assets/plugins/\n  changelog-page                         page HTML des versions dans dist/\n  bump patch|minor|major                 nouvelle version"
             );
             Ok(())
         }
@@ -284,6 +285,30 @@ fn today() -> String {
 }
 
 /// `bump patch|minor|major` : nouvelle version dans VERSION, les Cargo.toml et le CHANGELOG (daté).
+/// Construit les plugins d'exemple (`plugin-examples/`) en WebAssembly et les copie dans `assets/plugins/`.
+fn plugins() -> Res {
+    let root = workspace_root();
+    let dir = root.join("plugin-examples");
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let ok = std::process::Command::new(&cargo)
+        .current_dir(&dir)
+        .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
+        .status()?
+        .success();
+    if !ok {
+        return Err("échec de la compilation (cible installée ? rustup target add wasm32-unknown-unknown)".into());
+    }
+    let out = root.join("assets/plugins");
+    std::fs::create_dir_all(&out)?;
+    for name in ["barres-plein-ecran", "enhancer", "minuterie-de-sommeil"] {
+        let src = dir.join("target/wasm32-unknown-unknown/release").join(format!("{}.wasm", name.replace('-', "_")));
+        let dst = out.join(format!("{name}.wasm"));
+        std::fs::copy(&src, &dst)?;
+        println!("{} ({} Ko)", dst.display(), std::fs::metadata(&dst)?.len() / 1024);
+    }
+    Ok(())
+}
+
 fn bump(kind: Option<&str>) -> Res {
     let root = workspace_root();
     let old = version()?;
@@ -298,7 +323,7 @@ fn bump(kind: Option<&str>) -> Res {
     let new = format!("{}.{}.{}", p[0], p[1], p[2]);
     std::fs::write(root.join("VERSION"), format!("{new}\n"))?;
     // Toutes les crates du projet suivent la version du lecteur (première ligne `version = "…"` du paquet).
-    let dirs = ["crates/skin", "crates/core", "crates/audio", "crates/ui", "crates/net", "crates/spotify", "crates/player", "crates/milkdrop", "crates/museum", "app/desktop", "app/android"];
+    let dirs = ["crates/skin", "crates/core", "crates/audio", "crates/ui", "crates/net", "crates/spotify", "crates/player", "crates/milkdrop", "crates/museum", "crates/plugins", "app/desktop", "app/android"];
     for dir in dirs {
         let f = root.join(dir).join("Cargo.toml");
         if let Ok(t) = std::fs::read_to_string(&f) {

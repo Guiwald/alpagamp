@@ -10,11 +10,14 @@ members = [
     "crates/player",
     "crates/milkdrop",
     "crates/museum",
+    "crates/plugins",
     "app/desktop",
     "app/android",
     "xtask",
 ]
 default-members = ["app/desktop"]
+# Plugins d'exemple : espace de travail à part, compilé en WebAssembly (cargo xtask plugins).
+exclude = ["plugin-examples"]
 
 [workspace.package]
 edition = "2024"
@@ -33,6 +36,7 @@ alpagamp-net = { path = "crates/net" }
 alpagamp-spotify = { path = "crates/spotify" }
 alpagamp-milkdrop = { path = "crates/milkdrop" }
 alpagamp-museum = { path = "crates/museum" }
+alpagamp-plugins = { path = "crates/plugins" }
 
 thiserror = "2"
 log = "0.4"

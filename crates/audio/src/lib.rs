@@ -41,6 +41,15 @@ pub enum AudioError {
 /// Identifiant d'une demande de lecture (attribué par l'application).
 pub type Token = u64;
 
+/// Un effet audio ajouté après l'égaliseur (plugins DSP, ADR 0020). Il tourne dans le fil de décodage.
+pub trait Effect: Send {
+    /// Transforme `samples` (stéréo entrelacée) en place ; `false` : l'effet a échoué et doit être retiré.
+    fn process(&mut self, samples: &mut [f32], rate: u32) -> bool;
+}
+
+/// Chaîne d'effets partagée entre l'application et le fil de décodage.
+pub type Effects = Arc<Mutex<Vec<Box<dyn Effect>>>>;
+
 /// Une source PCM : produit de l'audio stéréo entrelacé à sa propre fréquence.
 pub trait PcmSource: Send {
     fn info(&self) -> &TrackInfo;
@@ -214,6 +223,7 @@ pub struct Engine {
     events: Receiver<Event>,
     shared: Arc<Shared>,
     timeline: Arc<Mutex<Timeline>>,
+    effects: Effects,
     thread: Option<std::thread::JoinHandle<()>>,
     _output: Output,
 }
@@ -225,9 +235,20 @@ impl Engine {
         let timeline = Arc::new(Mutex::new(Timeline::default()));
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
         let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
-        let worker = Worker::new(shared.clone(), timeline.clone(), cmd_rx, ev_tx);
+        let effects: Effects = Arc::default();
+        let worker = Worker::new(shared.clone(), timeline.clone(), effects.clone(), cmd_rx, ev_tx);
         let thread = std::thread::Builder::new().name("alpagamp-décodage".into()).spawn(move || worker.run()).expect("fil de décodage");
-        Engine { cmds: cmd_tx, events: ev_rx, shared, timeline, thread: Some(thread), _output: output }
+        Engine { cmds: cmd_tx, events: ev_rx, shared, timeline, effects, thread: Some(thread), _output: output }
+    }
+
+    /// Remplace les effets audio (appliqués après l'égaliseur, dans l'ordre).
+    pub fn set_effects(&self, effects: Vec<Box<dyn Effect>>) {
+        *self.effects.lock() = effects;
+    }
+
+    /// Nombre d'effets actifs (un effet qui échoue est retiré).
+    pub fn effect_count(&self) -> usize {
+        self.effects.lock().len()
     }
 
     /// Joue `media` (remplace ce qui joue).
@@ -403,6 +424,7 @@ struct Worker {
     /// Média du morceau suivant demandé (pour le rouvrir après un déplacement en fin de morceau).
     next_request: Option<(Token, Media)>,
     dsp: Dsp,
+    effects: Effects,
     rg: ReplayGain,
     crossfade_ms: u32,
     fade: Option<Fade>,
@@ -424,7 +446,7 @@ fn spawn_open(media: Media) -> Receiver<Result<Box<dyn PcmSource>, AudioError>> 
 }
 
 impl Worker {
-    fn new(shared: Arc<Shared>, timeline: Arc<Mutex<Timeline>>, cmds: Receiver<Cmd>, events: Sender<Event>) -> Worker {
+    fn new(shared: Arc<Shared>, timeline: Arc<Mutex<Timeline>>, effects: Effects, cmds: Receiver<Cmd>, events: Sender<Event>) -> Worker {
         let rate = shared.out_rate.load(Ordering::Relaxed);
         Worker {
             shared,
@@ -436,6 +458,7 @@ impl Worker {
             next: NextState::None,
             next_request: None,
             dsp: Dsp::new(rate),
+            effects,
             rg: ReplayGain::default(),
             crossfade_ms: 0,
             fade: None,
@@ -769,6 +792,14 @@ impl Worker {
             }
             if !self.resampled.is_empty() {
                 self.dsp.process(&mut self.resampled);
+                {
+                    let rate = self.out_rate();
+                    let mut fx = self.effects.lock();
+                    if !fx.is_empty() {
+                        let buf = &mut self.resampled;
+                        fx.retain_mut(|e| e.process(buf, rate));
+                    }
+                }
                 let mut q = self.shared.queue.lock();
                 q.samples.extend(self.resampled.iter().copied());
                 q.pushed += (self.resampled.len() / 2) as u64;

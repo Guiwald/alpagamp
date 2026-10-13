@@ -1,0 +1,9 @@
+[package]
+name = "alpagamp-plugin"
+description = "Petit kit pour écrire des plugins Alpagamp en Rust (API v1, ADR 0020)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]

@@ -134,6 +134,24 @@ impl Default for MilkSettings {
     }
 }
 
+/// Plugins WebAssembly (ADR 0020).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct PluginSettings {
+    /// Effets audio et plugins généraux activés (identifiants : nom du fichier sans `.wasm`).
+    pub enabled: Vec<String>,
+    /// Visualisation de plugin affichée à la place de MilkDrop (`None` : MilkDrop).
+    pub vis: Option<String>,
+    /// Options choisies : plugin → (option → valeur).
+    pub options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, i32>>,
+}
+
+impl PluginSettings {
+    pub fn is_enabled(&self, id: &str) -> bool {
+        self.enabled.iter().any(|e| e == id) || self.vis.as_deref() == Some(id)
+    }
+}
+
 /// Position et état d'une fenêtre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowState {
@@ -168,6 +186,7 @@ pub struct Settings {
     pub vis: VisSettings,
     pub playback: PlaybackSettings,
     pub milkdrop: MilkSettings,
+    pub plugins: PluginSettings,
     pub main_window: Option<WindowState>,
     pub eq_window: Option<WindowState>,
     pub playlist_window: Option<WindowState>,
@@ -196,6 +215,7 @@ impl Default for Settings {
             vis: VisSettings::default(),
             playback: PlaybackSettings::default(),
             milkdrop: MilkSettings::default(),
+            plugins: PluginSettings::default(),
             main_window: None,
             eq_window: None,
             playlist_window: None,

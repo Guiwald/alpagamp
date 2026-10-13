@@ -24,3 +24,4 @@ effacée : sa fiche passe au statut « remplacée par ADR n » et reste là.
 | [0017](0017-android-sans-java.md) | Android : NativeActivity sans Java, APK construit sans Gradle | acceptée |
 | [0018](0018-spotify-dans-le-moteur.md) | Spotify dans le moteur ; TLS de librespot (écart pour Android) | acceptée |
 | [0019](0019-lactea.md) | Moteur MilkDrop : lactea retenu après audit, composition GPU | acceptée |
+| [0020](0020-api-des-plugins.md) | API des plugins WebAssembly (v1) : wasmi, carburant, trois sortes, kit et exemples | acceptée |

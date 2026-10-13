@@ -1,0 +1,22 @@
+# Plugins d'exemple d'Alpagamp (ADR 0013, 0020), compilés en WebAssembly :
+#   cargo xtask plugins        (ou : cargo build --release --target wasm32-unknown-unknown ici)
+# Les fichiers .wasm obtenus sont copiés dans assets/plugins/ et livrés avec le lecteur.
+[workspace]
+resolver = "3"
+members = ["sdk", "barres-plein-ecran", "enhancer", "minuterie-de-sommeil"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "1.0.0"
+authors = ["Guiwald"]
+
+[workspace.dependencies]
+alpagamp-plugin = { path = "sdk" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
