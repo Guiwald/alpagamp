@@ -81,6 +81,10 @@ else
 fi
 
 echo "== 6/6 Version $VERSION"
+# Le .dmg de cette version, construit sur ce Mac s'il manque (GitHub le remplacera par un .dmg universel).
+if [ ! -e "$ICI/dist/Alpagamp-$VERSION.dmg" ] && [ -f "$ICI/construire-mac.sh" ]; then
+  bash "$ICI/construire-mac.sh" || echo "Construction du .dmg impossible : GitHub le fabriquera."
+fi
 FICHIERS=()
 for f in "$ICI/dist/Alpagamp-$VERSION.dmg" "$ICI/publication/Alpagamp-$VERSION-windows-x64.zip" "$ICI/publication/Alpagamp-$VERSION.apk"; do
   if [ -f "$f" ]; then FICHIERS+=("$f"); fi

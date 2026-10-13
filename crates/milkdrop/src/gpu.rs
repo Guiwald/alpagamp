@@ -53,21 +53,50 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
 impl Gpu {
     /// Choisit un adaptateur (compatible avec `surface` si donnée) et ouvre le périphérique.
     pub fn new(instance: wgpu::Instance, surface: Option<&wgpu::Surface>, low_power: bool) -> Result<Gpu, String> {
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        // L'adaptateur préféré d'abord, puis les autres (un pilote peut refuser le périphérique : on essaie le
+        // suivant, par exemple Vulkan après DirectX 12).
+        let mut candidates = Vec::new();
+        if let Ok(a) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: if low_power { wgpu::PowerPreference::LowPower } else { wgpu::PowerPreference::HighPerformance },
             force_fallback_adapter: false,
             compatible_surface: surface,
             apply_limit_buckets: false,
-        }))
-        .map_err(|e| format!("aucun GPU utilisable : {e}"))?;
-        let info = adapter.get_info();
-        log::info!("GPU : {} ({:?}, {})", info.name, info.backend, info.driver);
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("alpagamp"),
-            required_limits: adapter.limits(),
-            ..Default::default()
-        }))
-        .map_err(|e| format!("GPU refusé : {e}"))?;
+        })) {
+            candidates.push(a);
+        }
+        for a in pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all())) {
+            let info = a.get_info();
+            let known = candidates.iter().any(|c: &wgpu::Adapter| {
+                let ci = c.get_info();
+                ci.backend == info.backend && ci.name == info.name
+            });
+            if !known && surface.is_none_or(|s| a.is_surface_supported(s)) {
+                candidates.push(a);
+            }
+        }
+        // Les GPU logiciels en dernier.
+        candidates.sort_by_key(|a| a.get_info().device_type == wgpu::DeviceType::Cpu);
+        let mut last = String::from("aucun GPU utilisable");
+        let mut found = None;
+        for adapter in candidates {
+            let info = adapter.get_info();
+            match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("alpagamp"),
+                required_limits: adapter.limits(),
+                ..Default::default()
+            })) {
+                Ok((device, queue)) => {
+                    log::info!("GPU : {} ({:?}, {})", info.name, info.backend, info.driver);
+                    found = Some((adapter, device, queue));
+                    break;
+                }
+                Err(e) => {
+                    log::warn!("GPU {} ({:?}) refusé : {e}", info.name, info.backend);
+                    last = format!("GPU refusé : {e}");
+                }
+            }
+        }
+        let (adapter, device, queue) = found.ok_or(last)?;
         device.on_uncaptured_error(std::sync::Arc::new(|e: wgpu::Error| log::error!("wgpu : {e}")));
         let sampler = |f: wgpu::FilterMode| {
             device.create_sampler(&wgpu::SamplerDescriptor {

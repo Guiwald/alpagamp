@@ -297,10 +297,24 @@ fn bump(kind: Option<&str>) -> Res {
     }
     let new = format!("{}.{}.{}", p[0], p[1], p[2]);
     std::fs::write(root.join("VERSION"), format!("{new}\n"))?;
-    for dir in ["crates/skin", "crates/core", "crates/audio", "crates/ui", "crates/player", "app/desktop", "app/android"] {
+    // Toutes les crates du projet suivent la version du lecteur (première ligne `version = "…"` du paquet).
+    let dirs = ["crates/skin", "crates/core", "crates/audio", "crates/ui", "crates/net", "crates/spotify", "crates/player", "crates/milkdrop", "crates/museum", "app/desktop", "app/android"];
+    for dir in dirs {
         let f = root.join(dir).join("Cargo.toml");
         if let Ok(t) = std::fs::read_to_string(&f) {
-            std::fs::write(&f, t.replacen(&format!("version = \"{old}\""), &format!("version = \"{new}\""), 1))?;
+            let mut done = false;
+            let out: Vec<String> = t
+                .lines()
+                .map(|l| {
+                    if !done && l.starts_with("version = \"") {
+                        done = true;
+                        format!("version = \"{new}\"")
+                    } else {
+                        l.to_string()
+                    }
+                })
+                .collect();
+            std::fs::write(&f, out.join("\n") + "\n")?;
         }
     }
     let cl = root.join("CHANGELOG.md");

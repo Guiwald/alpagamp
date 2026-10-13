@@ -21,13 +21,14 @@ C'est gratuit, sans pub, sans compte à créer, et tout le code est ici, lisible
 5. [Spotify](#spotify)
 6. [Les radios](#les-radios)
 7. [Changer de skin](#changer-de-skin)
-8. [L'égaliseur](#légaliseur)
-9. [Les raccourcis clavier](#les-raccourcis-clavier)
-10. [Sur le téléphone](#sur-le-téléphone)
-11. [Ça ne marche pas ?](#ça-ne-marche-pas-)
-12. [Vie privée](#vie-privée)
-13. [Pour les curieux et les développeurs](#pour-les-curieux-et-les-développeurs)
-14. [English](#english)
+8. [La visualisation (MilkDrop)](#la-visualisation-milkdrop)
+9. [L'égaliseur](#légaliseur)
+10. [Les raccourcis clavier](#les-raccourcis-clavier)
+11. [Sur le téléphone](#sur-le-téléphone)
+12. [Ça ne marche pas ?](#ça-ne-marche-pas-)
+13. [Vie privée](#vie-privée)
+14. [Pour les curieux et les développeurs](#pour-les-curieux-et-les-développeurs)
+15. [English](#english)
 
 ---
 
@@ -45,29 +46,34 @@ Alpagamp, c'est cette expérience, refaite aujourd'hui :
 - **Les radios internet** : des milliers, avec une recherche par nom ou par style.
 - **Spotify** : tes playlists, tes titres likés, tes albums, la recherche — et tu peux même choisir Alpagamp comme
   « enceinte » depuis l'appli Spotify de ton téléphone. Il faut un compte **Spotify Premium**.
+- **Les visualisations façon MilkDrop** : des images qui dansent avec la musique, en fenêtre ou en plein écran,
+  avec six visualisations d'Alpagamp et un pack de près de 10 000 à télécharger d'un clic.
+- **Un navigateur de skins** : des dizaines de milliers de skins du Winamp Skin Museum, à essayer d'un clic.
 - **Un égaliseur 10 bandes**, le fondu enchaîné entre deux morceaux, le volume harmonisé entre les morceaux
   (ReplayGain), des signets…
 
 ## Ce qui marche aujourd'hui
 
-La version actuelle est la **0.4** : c'est une préversion. Elle marche, mais il manque encore des choses.
+La version actuelle est la **0.5** : c'est une préversion. Elle marche, mais il manque encore des choses.
 
 | Version | Ce qu'elle apporte | Où on en est |
 |---|---|---|
 | 0.1 | La fenêtre principale, la lecture de fichiers | fait |
 | 0.2 | L'égaliseur, la playlist, les fenêtres aimantées, la recherche de morceau | fait |
 | 0.3 | Les radios, le fondu enchaîné, ReplayGain, les signets, la première version Android | fait |
-| 0.4 | Spotify : connexion, Bibliothèque, Spotify Connect | **version actuelle** |
-| 0.5 | Les visualisations façon MilkDrop (plein écran), un navigateur de skins intégré | en cours |
-| 0.6 | Des extensions (plugins) qu'on peut ajouter, avec trois exemples | à venir |
+| 0.4 | Spotify : connexion, Bibliothèque, Spotify Connect | fait |
+| 0.5 | Les visualisations façon MilkDrop (plein écran), le navigateur de skins, la taille des fenêtres | **version actuelle** |
+| 0.6 | Des extensions (plugins) qu'on peut ajouter, avec trois exemples | en cours |
 | 0.7 | Android complet (musique qui continue écran éteint, commandes sur l'écran verrouillé), 7 langues partout | à venir |
 | 1.0 | Version finale, testée sur Mac, Android et Windows | à venir |
 
 Ce qu'il faut savoir avant d'installer :
 
 - **Android** : pour l'instant, la musique s'arrête si tu quittes l'appli. Ça arrive en 0.7.
-- **Mac** : le fichier de la version 0.4.0 marche sur les Mac à puce Apple (M1, M2, M3, M4…). Pour un Mac à
-  processeur Intel, attends la 0.5 (elle marchera sur les deux) ou [compile-le toi-même](#pour-les-curieux-et-les-développeurs).
+- **Mac** : le fichier marche sur les Mac à puce Apple (M1, M2, M3, M4…) et sur les Mac à processeur Intel
+  (macOS 11 ou plus récent).
+- **Visualisation** : il faut une carte graphique qui gère Vulkan, Metal (tous les Mac récents) ou DirectX 12
+  (presque tous les PC depuis 2015). Sans elle, tout le reste marche.
 - **iPhone** : pas encore, c'est prévu plus tard.
 - Les applis ne sont **pas signées** (Apple et Microsoft font payer ça chaque année). Ton ordinateur va donc
   afficher un avertissement la première fois : c'est normal, et on t'explique quoi faire juste en dessous.
@@ -84,16 +90,15 @@ Tout en bas de la version, dans **Assets**, prends le fichier qui correspond à 
 
 | Ton appareil | Le fichier à télécharger |
 |---|---|
-| Mac à puce Apple (M1, M2, M3, M4…) | `Alpagamp-0.4.0.dmg` |
-| PC Windows 10 ou 11 | `Alpagamp-0.4.0-windows-x64.zip` |
-| Téléphone Android 8 ou plus récent | `Alpagamp-0.4.0.apk` |
+| Mac (puce Apple ou Intel) | `Alpagamp-0.5.0.dmg` |
+| PC Windows 10 ou 11 | `Alpagamp-0.5.0-windows-x64.zip` |
+| Téléphone Android 8 ou plus récent | `Alpagamp-0.5.0.apk` |
 
-*Comment savoir si mon Mac a une puce Apple ?* Menu Pomme (la pomme en haut à gauche) → **À propos de ce Mac**. S'il y a
-écrit « Puce Apple M… », c'est bon. S'il y a écrit « Processeur Intel », c'est un Mac Intel.
+(Le numéro change à chaque version : prends simplement les fichiers de la dernière.)
 
 ### Sur Mac
 
-1. Double-clique sur `Alpagamp-0.4.0.dmg`. Une fenêtre s'ouvre avec l'icône d'Alpagamp et un dossier Applications.
+1. Double-clique sur `Alpagamp-0.5.0.dmg`. Une fenêtre s'ouvre avec l'icône d'Alpagamp et un dossier Applications.
 2. **Glisse Alpagamp sur le dossier Applications.** C'est installé !
 3. Ouvre ton dossier **Applications**, puis fais un **clic droit** (ou Ctrl + clic) sur Alpagamp → **Ouvrir** →
    encore **Ouvrir** dans la fenêtre qui apparaît. Il ne faut le faire qu'une seule fois : ensuite, Alpagamp
@@ -116,7 +121,7 @@ xattr -dr com.apple.quarantine /Applications/Alpagamp.app
 
 ### Sur Windows
 
-1. Fais un **clic droit** sur `Alpagamp-0.4.0-windows-x64.zip` → **Extraire tout…** → **Extraire**.
+1. Fais un **clic droit** sur `Alpagamp-0.5.0-windows-x64.zip` → **Extraire tout…** → **Extraire**.
 2. Dans le dossier qui s'ouvre, double-clique sur **`alpagamp.exe`**.
 3. La première fois, un écran bleu « Windows a protégé votre ordinateur » apparaît : clique sur
    **Informations complémentaires**, puis sur **Exécuter quand même**. (Même raison que sur Mac : l'appli n'est
@@ -128,7 +133,7 @@ simplement le dossier.
 
 ### Sur Android
 
-1. Sur ton téléphone, ouvre la page des versions dans Chrome et touche **`Alpagamp-0.4.0.apk`** pour le télécharger.
+1. Sur ton téléphone, ouvre la page des versions dans Chrome et touche **`Alpagamp-0.5.0.apk`** pour le télécharger.
 2. Ouvre le fichier téléchargé (la notification « Téléchargement terminé », ou l'appli **Fichiers** →
    **Téléchargements**).
 3. Android te demande d'autoriser Chrome (ou Fichiers) à **installer des applis inconnues** : touche
@@ -155,6 +160,9 @@ Il n'y a pas encore de fichier tout prêt : il faut le compiler (c'est facile, v
   barre de position.
 - **L'égaliseur** : pour régler les graves, les médiums et les aigus.
 - **La playlist** : la liste des morceaux. Tu peux l'agrandir en tirant son coin en bas à droite.
+
+**Trop petit ?** Clic droit → **Options** → **Taille des fenêtres** : ×1, ×2 ou ×3 (par défaut, Alpagamp choisit
+selon ton écran). **Ctrl + D** (Cmd + D sur Mac) passe de ×1 à ×2.
 
 Attrape une fenêtre par sa barre de titre pour la déplacer : elle **s'aimante** aux autres fenêtres et aux bords
 de l'écran. Quand tu déplaces la fenêtre principale, les fenêtres collées à elle suivent. (Garde **Maj** appuyée
@@ -210,12 +218,35 @@ Tu connais l'adresse d'une radio ? **Ctrl + L** (Cmd + L sur Mac) et colle-la.
 
 ## Changer de skin
 
-1. Va sur le **Winamp Skin Museum** : <https://skins.webamp.org> (des dizaines de milliers de skins gratuits).
-2. Choisis un skin et télécharge-le : c'est un fichier qui finit par `.wsz`.
-3. **Glisse le fichier `.wsz` sur Alpagamp.** C'est tout ! (Ou clic droit → **Skins** → **Charger un skin…**)
+Le plus simple : **Alt + S** (Option + S sur Mac), ou clic droit → **Skins** → **Navigateur de skins…**
 
-Les skins que tu as chargés restent dans le menu **Skins**. Pour revenir à l'apparence d'origine : **Skins** →
-**Skin par défaut**. (En version 0.5, un navigateur de skins sera intégré à Alpagamp.)
+- Onglet **Musée** : les skins du [Winamp Skin Museum](https://skins.webamp.org), avec un aperçu. Tape un nom dans
+  la case (« zelda », « matrix », « metal »…) puis **Entrée** pour chercher. **Un clic sur un skin le télécharge et
+  l'applique.** Fais défiler : la liste continue.
+- Onglet **Mes skins** : ceux que tu as déjà, et le skin d'origine d'Alpagamp.
+
+Tu as un fichier `.wsz` ? **Glisse-le sur Alpagamp**, ou bouton **Ouvrir…** du navigateur. Certains skins ont des
+coins arrondis ou des formes bizarres, et leurs propres curseurs de souris : Alpagamp les respecte.
+
+## La visualisation (MilkDrop)
+
+Ouvre la fenêtre de **visualisation** : **Ctrl + Maj + K** (Cmd + Maj + K sur Mac), ou **double-clic** sur le petit
+visualiseur de la fenêtre principale, ou clic droit → **Visualisation** → **Fenêtre de visualisation**. Des images
+dansent avec la musique ; elles changent toutes seules toutes les 20 secondes, en fondu.
+
+| Touche (fenêtre de visualisation) | Ce que ça fait |
+|---|---|
+| Double-clic, Entrée ou F11 | Plein écran (Échap pour en sortir) |
+| Espace / H | Visualisation suivante (avec fondu / d'un coup) |
+| Retour arrière | La précédente |
+| L (ou Alt + K) | Choisir une visualisation dans la liste (avec une recherche) |
+| R | Ordre au hasard ou dans l'ordre |
+| K | Garder celle-ci (ne plus changer tout seul) |
+
+Alpagamp en contient six. Pour en avoir près de **10 000** : clic droit dans la fenêtre → **Presets** →
+**Télécharger le pack de presets** (*Cream of the Crop*, 30 Mo environ, une seule fois). Tu peux aussi ajouter tes
+propres fichiers `.milk` : **Presets** → **Ouvrir le dossier des presets**, mets-les dedans, puis **Recharger les
+presets**. Le changement automatique (de 10 secondes à 2 minutes) et la durée du fondu se règlent dans le même menu.
 
 ## L'égaliseur
 
@@ -239,7 +270,10 @@ Sur Mac, **Ctrl** devient **Cmd** et **Alt** devient **Option**.
 | J | Aller à un morceau (recherche dans la playlist) |
 | S / R | Lecture aléatoire / répétition |
 | Alt + G / Alt + E / Alt + L | Afficher l'égaliseur / la playlist / la Bibliothèque |
-| Ctrl + D | Double taille |
+| Ctrl + D | Double taille (toutes les fenêtres) |
+| Ctrl + Maj + K | Fenêtre de visualisation |
+| Alt + K | Choisir une visualisation |
+| Alt + S | Navigateur de skins |
 | Ctrl + W (Cmd + Maj + W sur Mac) | Replier la fenêtre en bandeau |
 | Ctrl + T | Temps écoulé / temps restant |
 | Ctrl + A | Toujours au premier plan |
@@ -252,7 +286,10 @@ Sur Mac, **Ctrl** devient **Cmd** et **Alt** devient **Option**.
 
 Les trois fenêtres sont empilées et agrandies à la largeur de l'écran ; tout se touche comme on clique.
 
-- **Appui long n'importe où** : le menu (Bibliothèque, musique du téléphone, radios, options…).
+- **Appui long n'importe où** : le menu (Bibliothèque, visualisation, skins, musique du téléphone, radios,
+  options…).
+- **Visualisation plein écran** : menu → **Visualisation plein écran**, ou double-tap sur le petit visualiseur.
+  Glisse vers la gauche ou la droite pour changer d'image, double-tap pour revenir, appui long pour son menu.
 - **Double-tap sur un morceau** de la playlist : le jouer.
 - **Glisser** dans la playlist : la faire défiler.
 - Le bouton **Retour** ferme les menus.
@@ -276,6 +313,12 @@ de jouer sa musique avec un compte gratuit.
 **Spotify : Alpagamp n'apparaît pas dans les appareils** → vérifie qu'Alpagamp est ouvert et connecté avec le
 **même compte** Spotify que ton téléphone, puis attends quelques secondes.
 
+**La visualisation ne s'ouvre pas** (« aucune carte graphique compatible ») → ta carte graphique ou son pilote
+ne gère ni Vulkan, ni Metal, ni DirectX 12. Mets à jour le pilote de la carte graphique.
+
+**Téléphone : l'écran s'affiche mal** → menu → **Options** → décoche **Affichage par la carte graphique**, puis
+quitte et relance Alpagamp.
+
 **Une radio ne joue pas** → certaines radios utilisent un format qu'Alpagamp ne lit pas encore (« HLS ») ; essaie
 une autre radio.
 
@@ -294,8 +337,9 @@ appareil.
 ## Vie privée
 
 Alpagamp ne contient **ni publicité, ni pisteur, ni statistiques**. Il ne se connecte à internet que pour ce que
-tu lui demandes : Spotify (si tu t'y connectes), l'annuaire des radios (radio-browser.info) et les radios que tu
-écoutes. Tes réglages et ta connexion Spotify restent sur ton appareil.
+tu lui demandes : Spotify (si tu t'y connectes), l'annuaire des radios (radio-browser.info), les radios que tu
+écoutes, le Winamp Skin Museum (quand tu ouvres le navigateur de skins) et GitHub (quand tu télécharges le pack
+de visualisations). Tes réglages et ta connexion Spotify restent sur ton appareil.
 
 ---
 
@@ -341,6 +385,8 @@ cargo run -p alpagamp-android --bin phone-sim                                   
 | `crates/net` | Client HTTP/HTTPS |
 | `crates/spotify` | Connexion Spotify, Bibliothèque, Spotify Connect, annuaire des radios |
 | `crates/ui` | Les fenêtres, dessinées au pixel près |
+| `crates/milkdrop` | La visualisation : moteur [lactea](https://github.com/M0Rf30/lactea), GPU (wgpu), presets |
+| `crates/museum` | Le navigateur de skins (Winamp Skin Museum) |
 | `crates/player` | Le contrôleur de lecture commun |
 | `app/desktop` | L'appli Mac, Windows et Linux |
 | `app/android` | L'appli Android |
@@ -365,13 +411,14 @@ l'`.apk`, et les met sur la page des versions.
 skinnable players of the 2000s: a main window, a 10-band equalizer and a playlist editor that snap together,
 windowshade and double-size modes, and classic `.wsz` skins. It plays your local files (MP3, FLAC, OGG, AAC, WAV,
 ALAC…), thousands of internet radios, and your **Spotify** music (Premium account required, including Spotify
-Connect). It runs on **macOS**, **Windows** and **Android**. Free, no ads, no tracking, MIT licensed. Not
+Connect). It shows MilkDrop-style visualizations (window or full screen, ~10,000 presets downloadable in one
+click) and has a built-in skin browser for the Winamp Skin Museum. It runs on **macOS**, **Windows** and **Android**. Free, no ads, no tracking, MIT licensed. Not
 affiliated with Winamp or Nullsoft.
 
 **Install:** download the file for your device from the
 [latest release](https://github.com/Guiwald/alpagamp/releases/latest):
 
-- **Mac** (Apple silicon for 0.4.0): open the `.dmg`, drag Alpagamp to Applications, then right-click it → Open →
+- **Mac** (Apple silicon and Intel): open the `.dmg`, drag Alpagamp to Applications, then right-click it → Open →
   Open (the app isn't notarized). If macOS still refuses: System Settings → Privacy & Security → Open Anyway.
 - **Windows 10/11**: extract the `.zip`, run `alpagamp.exe`; on the SmartScreen warning click "More info" →
   "Run anyway".
@@ -380,7 +427,8 @@ affiliated with Winamp or Nullsoft.
 
 **Use:** drag files or folders onto the main window (play) or the playlist (add); right-click anywhere for the
 full menu; Alt+L opens the Library (Spotify, radios); drop a `.wsz` skin (from <https://skins.webamp.org>) to
-change the look. Classic shortcuts: Z X C V B for previous/play/pause/stop/next.
+change the look, or browse skins with Alt+S. Ctrl+Shift+K opens the visualization (double-click for full screen).
+Options › Window size sets ×1/×2/×3. Classic shortcuts: Z X C V B for previous/play/pause/stop/next.
 
 **Build from source:** install Rust (<https://rustup.rs>), then `git clone https://github.com/Guiwald/alpagamp`,
 `cd alpagamp`, `cargo run --release` (on Linux, first `sudo apt install libasound2-dev pkg-config`).
