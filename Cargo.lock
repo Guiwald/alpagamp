@@ -65,7 +65,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "alpagamp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-android"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-audio"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "alpagamp-core",
  "alpagamp-net",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "fastrand",
  "log",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-milkdrop"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "alpagamp-net",
  "fastrand",
@@ -158,7 +158,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-museum"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "alpagamp-core",
  "alpagamp-net",
@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-net"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "log",
  "rustls 0.23.45",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-player"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-skin"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "log",
  "png",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-spotify"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-ui"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "alpagamp-core",
  "alpagamp-skin",

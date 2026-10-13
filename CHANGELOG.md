@@ -6,6 +6,14 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+## [0.5.0] - 2026-10-14
+
+> Mise en service : Mac (`Alpagamp-0.5.0.dmg`, puce Apple et Intel) — remplacer l'application dans Applications ;
+> les positions des fenêtres peuvent revenir à leur place par défaut une fois. Windows — remplacer le dossier.
+> Android (`Alpagamp-0.5.0.apk`) — installer par-dessus la 0.4. Visualisation : Ctrl+Maj+K (Cmd+Maj+K), puis clic
+> droit › Presets › Télécharger le pack ; sur téléphone : menu › Visualisation plein écran. Skins : Alt+S.
+> Taille : Options › Taille des fenêtres.
+
 ### Ajouté
 - Visualisation : fenêtre de visualisation (Ctrl+Maj+K, double-clic sur le visualiseur, menu Visualisation)
   qui affiche les presets MilkDrop avec le moteur lactea ; cadre de skin redimensionnable, plein écran
