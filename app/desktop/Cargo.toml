@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Alpagamp — lecteur de musique à skins classiques"
 edition.workspace = true
 license.workspace = true
@@ -15,6 +15,7 @@ alpagamp-skin.workspace = true
 alpagamp-core.workspace = true
 alpagamp-audio.workspace = true
 alpagamp-ui.workspace = true
+alpagamp-player.workspace = true
 log.workspace = true
 env_logger.workspace = true
 winit = "0.30"

@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp-ui"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fenêtres skinnées d'Alpagamp : rendu au pixel près et interactions, indépendants de la plateforme"
 edition.workspace = true
 license.workspace = true

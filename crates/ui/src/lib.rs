@@ -5,6 +5,7 @@ pub mod eq_window;
 pub mod gen_window;
 pub mod main_window;
 pub mod marquee;
+pub mod menu_window;
 pub mod paint;
 pub mod playlist_window;
 pub mod text;
@@ -13,6 +14,7 @@ pub mod vis;
 pub use eq_window::{EqView, EqWindow};
 pub use gen_window::{GenKey, GenKind, GenView, GenWindow};
 pub use main_window::{MainView, MainWindow};
+pub use menu_window::{MenuItem, MenuResult, MenuWindow};
 pub use playlist_window::{PlMenuItem, PlaylistView, PlaylistWindow};
 
 /// État du transport tel qu'affiché.

@@ -1,0 +1,13 @@
+[package]
+name = "alpagamp-player"
+version = "0.3.0"
+description = "Contrôleur de lecture d'Alpagamp (playlist + moteur audio + réglages), commun au bureau et au téléphone"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alpagamp-core.workspace = true
+alpagamp-audio.workspace = true
+alpagamp-ui.workspace = true
+log.workspace = true

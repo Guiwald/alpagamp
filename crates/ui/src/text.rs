@@ -83,21 +83,27 @@ thread_local! {
 
 /// Dessine des morceaux de texte dans un tampon 32 bits (`0x??RRGGBB`) de `w`x`h`, agrandi `zoom` fois.
 pub fn draw_runs(buf: &mut [u32], w: u32, h: u32, zoom: f32, runs: &[TextRun]) {
+    draw_runs_at(buf, w, h, zoom, (0.0, 0.0), runs);
+}
+
+/// Comme [`draw_runs`], la fenêtre étant placée en `origin` (pixels physiques) dans le tampon.
+pub fn draw_runs_at(buf: &mut [u32], w: u32, h: u32, zoom: f32, origin: (f32, f32), runs: &[TextRun]) {
     let f = font();
+    let (ox, oy) = origin;
     for run in runs {
         let px = (run.size * zoom).round().max(4.0);
         let lm = f.horizontal_line_metrics(px);
         let ascent = lm.map(|m| m.ascent).unwrap_or(px * 0.8);
         let width = measure(&run.text, run.size) * zoom;
-        let mut pen_x = run.x * zoom;
+        let mut pen_x = ox + run.x * zoom;
         if run.align == Align::Right {
             pen_x -= width;
         }
-        let baseline = run.y * zoom + ascent;
-        let clip_x0 = ((run.clip.x as f32) * zoom).max(0.0) as i32;
-        let clip_y0 = ((run.clip.y as f32) * zoom).max(0.0) as i32;
-        let clip_x1 = (((run.clip.x + run.clip.w) as f32) * zoom).min(w as f32) as i32;
-        let clip_y1 = (((run.clip.y + run.clip.h) as f32) * zoom).min(h as f32) as i32;
+        let baseline = oy + run.y * zoom + ascent;
+        let clip_x0 = (ox + (run.clip.x as f32) * zoom).max(0.0) as i32;
+        let clip_y0 = (oy + (run.clip.y as f32) * zoom).max(0.0) as i32;
+        let clip_x1 = (ox + ((run.clip.x + run.clip.w) as f32) * zoom).min(w as f32) as i32;
+        let clip_y1 = (oy + ((run.clip.y + run.clip.h) as f32) * zoom).min(h as f32) as i32;
         let (cr, cg, cb) = ((run.color >> 16) & 0xFF, (run.color >> 8) & 0xFF, run.color & 0xFF);
         for ch in run.text.chars() {
             CACHE.with(|cache| {

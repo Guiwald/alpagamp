@@ -1,4 +1,4 @@
-//! Le contrôleur de lecture : playlist + moteur audio + réglages.
+//! Le contrôleur de lecture : playlist + moteur audio + réglages, commun au bureau et au téléphone.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

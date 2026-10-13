@@ -27,7 +27,7 @@ use crate::dialogs;
 use crate::keys::{self, Focus};
 use crate::layout::{self, R};
 use crate::paths::Paths;
-use crate::player::Player;
+use alpagamp_player::Player;
 use crate::window::{SkinWindow, WindowOptions};
 
 /// Distance d'aimantation, en pixels skin.

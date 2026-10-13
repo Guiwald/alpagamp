@@ -10,7 +10,6 @@ mod layout;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod menu;
 mod paths;
-mod player;
 mod window;
 
 use std::path::PathBuf;
