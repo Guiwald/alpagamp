@@ -5,6 +5,8 @@ members = [
     "crates/core",
     "crates/audio",
     "crates/ui",
+    "crates/net",
+    "crates/spotify",
     "crates/player",
     "app/desktop",
     "app/android",
@@ -25,6 +27,8 @@ alpagamp-core = { path = "crates/core" }
 alpagamp-audio = { path = "crates/audio" }
 alpagamp-ui = { path = "crates/ui" }
 alpagamp-player = { path = "crates/player" }
+alpagamp-net = { path = "crates/net" }
+alpagamp-spotify = { path = "crates/spotify" }
 
 thiserror = "2"
 log = "0.4"

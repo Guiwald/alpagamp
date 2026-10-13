@@ -2,6 +2,7 @@
 
 pub mod eq;
 pub mod formats;
+pub mod library;
 pub mod i18n;
 pub mod playlist;
 pub mod settings;

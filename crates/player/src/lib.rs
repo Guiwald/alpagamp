@@ -30,6 +30,10 @@ pub struct Player {
     pub stop_after_current: bool,
     /// Message d'erreur récent (affiché dans le titre).
     pub last_error: Option<(String, Instant)>,
+    /// Ouvre les sources que le lecteur ne sait pas ouvrir seul (Spotify).
+    pub resolver: Option<Box<dyn Fn(&Source) -> Option<Media> + Send>>,
+    /// Lecture hors playlist (Spotify Connect) : son étiquette.
+    external: Option<String>,
 }
 
 impl Player {
@@ -48,6 +52,8 @@ impl Player {
             fade: None,
             stop_after_current: false,
             last_error: None,
+            resolver: None,
+            external: None,
         };
         p.apply_volume();
         p.engine.set_eq(p.settings.eq);
@@ -97,6 +103,33 @@ impl Player {
     pub fn playlist_changed(&mut self) {
         self.scanner.pending = true;
         self.replan();
+    }
+
+    /// Joue une source hors playlist (Spotify Connect) ; `label` s'affiche après le titre.
+    pub fn play_external(&mut self, media: Media, label: &str) {
+        self.stop();
+        let t = self.next_token();
+        self.playing = Some((t, 0));
+        self.external = Some(label.to_string());
+        self.engine.play(t, media, 0, false);
+    }
+
+    /// Une source hors playlist est en cours.
+    pub fn is_external(&self) -> bool {
+        self.external.is_some()
+    }
+
+    /// Temps affiché dans la playlist (« 1:23 » ou « -2:34 »), vide à l'arrêt.
+    pub fn time_text(&self) -> String {
+        let st = self.engine.status();
+        if st.state == PlayState::Stopped {
+            return String::new();
+        }
+        let dur = st.info.as_ref().and_then(|i| i.duration_ms);
+        match (self.settings.time_remaining, dur) {
+            (true, Some(d)) => format!("-{}", format_duration(d.saturating_sub(st.position_ms))),
+            _ => format_duration(st.position_ms),
+        }
     }
 
     /// Index dans la playlist du morceau entendu (s'il y est toujours).
@@ -167,6 +200,9 @@ impl Player {
 
     fn media_for(&self, i: usize) -> Option<Media> {
         let e = self.playlist.entries().get(i)?;
+        if let Some(m) = self.resolver.as_ref().and_then(|r| r(&e.source)) {
+            return Some(m);
+        }
         match &e.source {
             Source::File(p) => Some(Media::File(p.clone())),
             Source::Url(u) => Some(Media::Url(u.clone())),
@@ -179,6 +215,7 @@ impl Player {
         if i >= self.playlist.len() {
             return;
         }
+        self.external = None;
         self.playlist.set_current(Some(i));
         self.fade = None;
         match self.media_for(i) {
@@ -215,6 +252,7 @@ impl Player {
 
     pub fn stop(&mut self) {
         self.fade = None;
+        self.external = None;
         self.engine.stop();
         self.playing = None;
         self.planned = None;
@@ -311,7 +349,7 @@ impl Player {
 
     /// Prépare (ou annule) l'enchaînement sans blanc vers le morceau suivant.
     pub fn replan(&mut self) {
-        if self.playing.is_none() || self.stop_after_current {
+        if self.playing.is_none() || self.stop_after_current || self.external.is_some() {
             if self.planned.take().is_some() {
                 self.engine.set_next(None);
             }
@@ -356,7 +394,9 @@ impl Player {
                     if let Some((_, id)) = self.playing.filter(|(t, _)| *t == token) {
                         self.on_track_info(token, &info);
                         self.info = Some(info);
-                        self.track_changed = Some(id);
+                        if self.external.is_none() {
+                            self.track_changed = Some(id);
+                        }
                         self.replan();
                     }
                 }
@@ -384,6 +424,11 @@ impl Player {
                     }
                 }
                 Event::Ended { token } => {
+                    if self.playing.is_some_and(|(t, _)| t == token) && self.external.take().is_some() {
+                        self.playing = None;
+                        self.info = None;
+                        continue;
+                    }
                     if self.playing.is_some_and(|(t, _)| t == token) {
                         self.playing = None;
                         self.info = None;
@@ -469,8 +514,16 @@ impl Player {
             PlayState::Paused => Transport::Paused,
         };
         let info = st.info.as_ref();
+        let external = self.external.as_ref().map(|label| {
+            let t = info.and_then(|i| i.display_title()).unwrap_or_default();
+            match info.and_then(|i| i.duration_ms) {
+                Some(d) => format!("{t} ({}) [{label}]", format_duration(d)),
+                None => format!("{t} [{label}]"),
+            }
+        });
         let title = match (&self.last_error, self.playlist.current_entry()) {
             (Some((msg, at)), _) if at.elapsed() < Duration::from_secs(4) => msg.clone(),
+            _ if external.is_some() => external.unwrap_or_default(),
             (_, Some(e)) => {
                 let n = self.playlist.current().unwrap_or(0) + 1;
                 let dur = e.duration_ms.or(info.and_then(|i| i.duration_ms));

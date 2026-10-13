@@ -3,6 +3,7 @@
 
 pub mod eq_window;
 pub mod gen_window;
+pub mod library_window;
 pub mod main_window;
 pub mod marquee;
 pub mod menu_window;
@@ -13,6 +14,7 @@ pub mod vis;
 
 pub use eq_window::{EqView, EqWindow};
 pub use gen_window::{GenKey, GenKind, GenView, GenWindow};
+pub use library_window::{LibTab, LibraryAction, LibraryView, LibraryWindow};
 pub use main_window::{MainView, MainWindow};
 pub use menu_window::{MenuItem, MenuResult, MenuWindow};
 pub use playlist_window::{PlMenuItem, PlaylistView, PlaylistWindow};
@@ -87,6 +89,8 @@ pub enum Action {
     JumpTo(usize),
     /// Adresse saisie (« Ajouter une adresse »).
     SubmitUrl(String),
+    /// Bibliothèque (Spotify, radios).
+    Library(LibraryAction),
 }
 
 #[cfg(test)]

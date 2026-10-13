@@ -1,0 +1,32 @@
+[package]
+name = "alpagamp-spotify"
+version = "0.3.0"
+description = "Spotify dans Alpagamp : connexion, lecture par librespot dans la chaîne audio, Spotify Connect, bibliothèque"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alpagamp-core.workspace = true
+alpagamp-audio.workspace = true
+alpagamp-net.workspace = true
+log.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+serde = { workspace = true }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
+futures-util = { version = "0.3", default-features = false }
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+librespot-playback = { version = "0.8", default-features = false }
+librespot-metadata = { version = "0.8", default-features = false }
+librespot-connect = { version = "0.8", default-features = false }
+
+# TLS de librespot : celui du système sur Mac et Windows ; rustls (avec ring) ailleurs. Voir ADR 0018.
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "ios"))'.dependencies]
+librespot-core = { version = "0.8", default-features = false, features = ["native-tls"] }
+
+[target.'cfg(not(any(target_os = "macos", target_os = "windows", target_os = "ios")))'.dependencies]
+librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
