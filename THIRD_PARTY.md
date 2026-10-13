@@ -29,3 +29,9 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 
 « Winamp » est une marque de Winamp Group SA. Alpagamp n'est ni affilié à Winamp Group, ni approuvé par lui.
 Les skins `.wsz` tiers appartiennent à leurs auteurs ; aucun n'est distribué avec Alpagamp.
+
+## Liberation Sans — SIL Open Font License 1.1
+
+Police de la playlist et des fenêtres génériques (métriques compatibles Arial, la police par défaut des skins) :
+`assets/fonts/LiberationSans-Regular.ttf`, licence complète dans `assets/fonts/LICENSE-OFL.txt`.
+Copyright (c) 2010 Google Corporation ; Copyright (c) 2012 Red Hat, Inc. (Reserved Font Name « Liberation »).

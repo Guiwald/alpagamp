@@ -1,12 +1,19 @@
 //! Fenêtres skinnées d'Alpagamp, indépendantes de la plateforme : chaque fenêtre se dessine dans une
 //! image RGBA à l'échelle 1 et traduit les clics (en coordonnées skin) en [`Action`].
 
+pub mod eq_window;
+pub mod gen_window;
 pub mod main_window;
 pub mod marquee;
 pub mod paint;
+pub mod playlist_window;
+pub mod text;
 pub mod vis;
 
+pub use eq_window::{EqView, EqWindow};
+pub use gen_window::{GenKey, GenKind, GenView, GenWindow};
 pub use main_window::{MainView, MainWindow};
+pub use playlist_window::{PlMenuItem, PlaylistView, PlaylistWindow};
 
 /// État du transport tel qu'affiché.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -56,6 +63,28 @@ pub enum Action {
     /// Commencer à déplacer la fenêtre (l'application suit la souris et gère l'aimantation).
     StartMove,
     About,
+    // --- Égaliseur ---
+    /// Curseur de bande `i` (0..10) à la valeur 0..=63 (31 = 0 dB).
+    SetEqBand(usize, u8),
+    SetPreamp(u8),
+    /// Toutes les bandes à la même valeur (clic sur +12 / 0 / −12).
+    SetEqAllBands(u8),
+    ToggleEqEnabled,
+    ToggleEqAuto,
+    EqPresetsMenu,
+    // --- Playlist ---
+    PlaylistClick { index: usize, shift: bool, ctrl: bool },
+    /// Double-clic : jouer cette entrée.
+    PlaylistPlay(usize),
+    /// Glisser la sélection de `n` lignes (négatif = vers le haut).
+    PlaylistMoveSelection(isize),
+    PlaylistResize(u32, u32),
+    PlaylistMenu(PlMenuItem),
+    // --- Fenêtres génériques ---
+    /// Lancer l'entrée de playlist `i` (« Aller au morceau »).
+    JumpTo(usize),
+    /// Adresse saisie (« Ajouter une adresse »).
+    SubmitUrl(String),
 }
 
 #[cfg(test)]
