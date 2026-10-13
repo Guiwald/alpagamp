@@ -1,0 +1,18 @@
+[package]
+name = "alpagamp-net"
+version = "0.3.0"
+description = "Client HTTP/HTTPS minimal d'Alpagamp (radios, Spotify, API web), sans C"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+log.workspace = true
+# rustls avec la cryptographie graviola (Rust et assembleur vérifié, sans C ; ADR 0004).
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "logging"] }
+rustls-graviola = "0.4"
+webpki-roots = "1"
+
+# Certificats racines du système (proxys d'entreprise qui inspectent le TLS, comme Zscaler).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rustls-native-certs = "0.8"

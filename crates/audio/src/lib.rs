@@ -56,6 +56,11 @@ pub trait PcmSource: Send {
     fn ready(&self) -> bool {
         true
     }
+    /// La source repart d'une autre position (morceau suivant choisi ailleurs, en Spotify Connect) : la
+    /// position affichée repart de cette valeur (ms), à prendre une fois.
+    fn take_position_reset(&mut self) -> Option<u64> {
+        None
+    }
 }
 
 impl PcmSource for Decoder {
@@ -726,6 +731,15 @@ impl Worker {
                     }
                 }
                 let _ = self.events.send(Event::InfoChanged { token, info });
+            }
+            if let Some(ms) = cur.src.take_position_reset() {
+                let token = cur.token;
+                cur.base_ms = ms;
+                cur.out_frames = 0;
+                let start = self.shared.queue.lock().pushed;
+                let mut tl = self.timeline.lock();
+                let info = tl.segments.iter().rev().find(|s| s.token == token).map(|s| s.info.clone()).unwrap_or_default();
+                tl.segments.push_back(Segment { start, token, base_ms: ms, info, announced: true });
             }
             self.resampled.clear();
             if n == 0 {

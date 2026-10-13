@@ -5,11 +5,12 @@
 //! tampon est trop maigre.
 
 use std::collections::VecDeque;
-use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+
+use alpagamp_net::Url;
 
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::io::MediaSource;
@@ -22,227 +23,6 @@ const PREBUFFER: usize = 48 * 1024;
 /// En dessous, la source attend (sauf en fin de flux).
 const LOW_WATER: usize = 12 * 1024;
 const MAX_BUFFER: usize = 4 * 1024 * 1024;
-const USER_AGENT: &str = concat!("Alpagamp/", env!("CARGO_PKG_VERSION"));
-
-/// Adresse décomposée.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Url {
-    pub tls: bool,
-    pub host: String,
-    pub port: u16,
-    /// Chemin et requête (« /stream?x=1 »).
-    pub path: String,
-}
-
-impl Url {
-    pub fn parse(s: &str) -> Result<Url, AudioError> {
-        let s = s.trim();
-        let (tls, rest) = if let Some(r) = s.strip_prefix("https://") {
-            (true, r)
-        } else if let Some(r) = s.strip_prefix("http://") {
-            (false, r)
-        } else if let Some(r) = s.strip_prefix("icy://") {
-            (false, r)
-        } else {
-            return Err(AudioError::Open(format!("adresse non prise en charge : {s}")));
-        };
-        let (authority, path) = match rest.find(['/', '?']) {
-            Some(i) => (&rest[..i], rest[i..].to_string()),
-            None => (rest, "/".to_string()),
-        };
-        let path = if path.starts_with('?') { format!("/{path}") } else { path };
-        let authority = authority.rsplit('@').next().unwrap_or(authority);
-        let default_port = if tls { 443 } else { 80 };
-        let (host, port) = if let Some(h) = authority.strip_prefix('[') {
-            // IPv6 : [::1]:8000
-            let end = h.find(']').ok_or_else(|| AudioError::Open(format!("adresse invalide : {s}")))?;
-            let port = h[end + 1..].strip_prefix(':').and_then(|p| p.parse().ok()).unwrap_or(default_port);
-            (h[..end].to_string(), port)
-        } else {
-            match authority.rsplit_once(':') {
-                Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) && !p.is_empty() => {
-                    (h.to_string(), p.parse().map_err(|_| AudioError::Open(format!("port invalide : {s}")))?)
-                }
-                _ => (authority.to_string(), default_port),
-            }
-        };
-        if host.is_empty() {
-            return Err(AudioError::Open(format!("adresse invalide : {s}")));
-        }
-        Ok(Url { tls, host, port, path })
-    }
-
-    /// Résout une adresse relative (redirection).
-    fn join(&self, location: &str) -> Result<Url, AudioError> {
-        if location.contains("://") {
-            return Url::parse(location);
-        }
-        let scheme = if self.tls { "https" } else { "http" };
-        if location.starts_with('/') {
-            return Url::parse(&format!("{scheme}://{}:{}{location}", self.host, self.port));
-        }
-        let base = self.path.rsplit_once('/').map(|(b, _)| b).unwrap_or("");
-        Url::parse(&format!("{scheme}://{}:{}{base}/{location}", self.host, self.port))
-    }
-}
-
-/// En-têtes d'une réponse (noms en minuscules).
-#[derive(Debug, Clone, Default)]
-pub struct Response {
-    pub status: u16,
-    pub headers: Vec<(String, String)>,
-}
-
-impl Response {
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
-    }
-}
-
-type Conn = Box<dyn Read + Send + Sync>;
-
-/// Racines de confiance : celles de Mozilla, plus celles du système (dont les autorités ajoutées par une
-/// entreprise ou par l'utilisateur, et `SSL_CERT_FILE`).
-fn root_store() -> rustls::RootCertStore {
-    let mut roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
-    #[cfg(not(target_os = "android"))]
-    {
-        let native = rustls_native_certs::load_native_certs();
-        let (added, _) = roots.add_parsable_certificates(native.certs);
-        log::debug!("{added} certificats racines du système");
-    }
-    #[cfg(target_os = "android")]
-    {
-        use rustls::pki_types::CertificateDer;
-        use rustls::pki_types::pem::PemObject;
-        for dir in ["/system/etc/security/cacerts", "/apex/com.android.conscrypt/cacerts", "/data/misc/user/0/cacerts-added"] {
-            let Ok(rd) = std::fs::read_dir(dir) else { continue };
-            for e in rd.flatten() {
-                if let Ok(bytes) = std::fs::read(e.path()) {
-                    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&bytes).flatten().collect();
-                    roots.add_parsable_certificates(certs);
-                }
-            }
-        }
-    }
-    roots
-}
-
-fn tls_config() -> Arc<rustls::ClientConfig> {
-    static CFG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
-    CFG.get_or_init(|| {
-        let roots = root_store();
-        let cfg = rustls::ClientConfig::builder_with_provider(Arc::new(rustls_graviola::default_provider()))
-            .with_safe_default_protocol_versions()
-            .expect("versions TLS")
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        Arc::new(cfg)
-    })
-    .clone()
-}
-
-/// Lit l'en-tête de réponse octet par octet (jusqu'à la ligne vide).
-fn read_head(r: &mut dyn Read) -> Result<Response, AudioError> {
-    let mut head = Vec::with_capacity(1024);
-    let mut byte = [0u8; 1];
-    while !head.ends_with(b"\r\n\r\n") && !head.ends_with(b"\n\n") {
-        if head.len() > 32 * 1024 {
-            return Err(AudioError::Open("en-tête de réponse trop long".into()));
-        }
-        match r.read(&mut byte) {
-            Ok(0) => return Err(AudioError::Open("connexion fermée par le serveur".into())),
-            Ok(_) => head.push(byte[0]),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(AudioError::Open(format!("lecture : {e}"))),
-        }
-    }
-    let text = String::from_utf8_lossy(&head);
-    let mut lines = text.lines();
-    let status_line = lines.next().unwrap_or_default();
-    let mut parts = status_line.split_whitespace();
-    let proto = parts.next().unwrap_or_default();
-    if !(proto.starts_with("HTTP/") || proto == "ICY") {
-        return Err(AudioError::Open(format!("réponse inattendue : {status_line}")));
-    }
-    let status = parts.next().and_then(|c| c.parse().ok()).unwrap_or(0);
-    let headers = lines
-        .filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())))
-        .collect();
-    Ok(Response { status, headers })
-}
-
-/// Mandataire HTTP pris dans l'environnement (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`), s'il y en a un.
-fn proxy_for(url: &Url) -> Option<Url> {
-    let names: &[&str] = if url.tls { &["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] } else { &["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] };
-    let p = names.iter().find_map(|n| std::env::var(n).ok().filter(|v| !v.trim().is_empty()))?;
-    let no_proxy = std::env::var("NO_PROXY").or_else(|_| std::env::var("no_proxy")).unwrap_or_default();
-    if no_proxy.split(',').map(str::trim).any(|d| !d.is_empty() && (d == "*" || url.host == d || url.host.ends_with(&format!(".{}", d.trim_start_matches('.'))))) {
-        return None;
-    }
-    let p = if p.contains("://") { p } else { format!("http://{p}") };
-    Url::parse(&p).ok().filter(|u| !u.tls)
-}
-
-/// Connexion TCP vers `url`, directe ou par un tunnel CONNECT du mandataire.
-fn connect(url: &Url) -> Result<TcpStream, AudioError> {
-    let via = proxy_for(url);
-    let (host, port) = match &via {
-        Some(p) => (p.host.as_str(), p.port),
-        None => (url.host.as_str(), url.port),
-    };
-    let addr = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| AudioError::Open(format!("{host} : {e}")))?
-        .next()
-        .ok_or_else(|| AudioError::Open(format!("{host} : adresse introuvable")))?;
-    let mut tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(10)).map_err(|e| AudioError::Open(format!("{host} : {e}")))?;
-    let _ = tcp.set_read_timeout(Some(Duration::from_secs(20)));
-    let _ = tcp.set_nodelay(true);
-    if via.is_some() {
-        let target = format!("{}:{}", url.host, url.port);
-        tcp.write_all(format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nUser-Agent: {USER_AGENT}\r\n\r\n").as_bytes())
-            .map_err(|e| AudioError::Open(format!("mandataire : {e}")))?;
-        let resp = read_head(&mut tcp)?;
-        if resp.status != 200 {
-            return Err(AudioError::Open(format!("le mandataire répond {}", resp.status)));
-        }
-    }
-    Ok(tcp)
-}
-
-/// Ouvre une connexion et envoie la requête ; suit les redirections.
-pub fn request(url: &Url) -> Result<(Url, Response, Conn), AudioError> {
-    let mut url = url.clone();
-    for _ in 0..6 {
-        let tcp = connect(&url)?;
-        let req = format!(
-            "GET {} HTTP/1.0\r\nHost: {}\r\nUser-Agent: {USER_AGENT}\r\nAccept: */*\r\nIcy-MetaData: 1\r\nConnection: close\r\n\r\n",
-            url.path, url.host
-        );
-        let mut conn: Conn = if url.tls {
-            let name = rustls::pki_types::ServerName::try_from(url.host.clone()).map_err(|e| AudioError::Open(format!("{} : {e}", url.host)))?;
-            let client = rustls::ClientConnection::new(tls_config(), name).map_err(|e| AudioError::Open(format!("TLS : {e}")))?;
-            let mut s = rustls::StreamOwned::new(client, tcp);
-            s.write_all(req.as_bytes()).map_err(|e| AudioError::Open(format!("TLS : {e}")))?;
-            Box::new(s)
-        } else {
-            let mut t = tcp;
-            t.write_all(req.as_bytes()).map_err(|e| AudioError::Open(format!("envoi : {e}")))?;
-            Box::new(t)
-        };
-        let resp = read_head(&mut *conn)?;
-        match resp.status {
-            200 => return Ok((url, resp, conn)),
-            301 | 302 | 303 | 307 | 308 => {
-                let loc = resp.header("location").ok_or_else(|| AudioError::Open("redirection sans adresse".into()))?;
-                url = url.join(loc)?;
-            }
-            s => return Err(AudioError::Open(format!("le serveur répond {s}"))),
-        }
-    }
-    Err(AudioError::Open("trop de redirections".into()))
-}
 
 /// Extrait `StreamTitle` d'un bloc de métadonnées ICY.
 pub fn parse_stream_title(meta: &[u8]) -> Option<String> {
@@ -402,8 +182,8 @@ pub fn open_stream(address: &str) -> Result<StreamSource, AudioError> {
 }
 
 fn open_inner(address: &str, depth: u32) -> Result<StreamSource, AudioError> {
-    let url = Url::parse(address)?;
-    let (url, resp, mut conn) = request(&url)?;
+    let url = Url::parse(address).map_err(|e| AudioError::Open(e.0))?;
+    let (url, resp, mut conn) = alpagamp_net::open_stream(&url).map_err(|e| AudioError::Open(e.0))?;
     let ct = resp.header("content-type").map(|s| s.to_string());
     if url.path.to_ascii_lowercase().contains(".m3u8") || ct.as_deref().is_some_and(|c| c.contains("vnd.apple.mpegurl")) {
         return Err(AudioError::Unsupported("flux HLS (.m3u8) pas encore pris en charge".into()));
@@ -542,19 +322,7 @@ impl PcmSource for StreamSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn urls() {
-        let u = Url::parse("http://radio.example.org:8000/stream?x=1").unwrap();
-        assert_eq!((u.tls, u.host.as_str(), u.port, u.path.as_str()), (false, "radio.example.org", 8000, "/stream?x=1"));
-        let u = Url::parse("https://example.org").unwrap();
-        assert_eq!((u.tls, u.port, u.path.as_str()), (true, 443, "/"));
-        let u = Url::parse("http://[::1]:9000/a").unwrap();
-        assert_eq!((u.host.as_str(), u.port), ("::1", 9000));
-        assert_eq!(u.join("/b").unwrap().path, "/b");
-        assert_eq!(Url::parse("http://h/dir/x.pls").unwrap().join("y.mp3").unwrap().path, "/dir/y.mp3");
-        assert!(Url::parse("ftp://x").is_err());
-    }
+    use std::io::Write;
 
     #[test]
     fn icy_demux_and_title() {
