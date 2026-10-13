@@ -26,6 +26,8 @@ pub struct MenuState<'a> {
     pub library_open: bool,
     pub spotify_connected: bool,
     pub milk_open: bool,
+    /// Agrandissement effectif des fenêtres.
+    pub zoom: u32,
     /// Le pack de presets est installé (ou en cours d'installation).
     pub pack_installed: bool,
 }
@@ -67,7 +69,7 @@ impl Menus {
             let _ = bar.append(&playback_submenu());
             let _ = bar.append(&bookmarks_submenu(st));
             let _ = bar.append(&windows_submenu(st));
-            let _ = bar.append(&options_submenu(st.settings));
+            let _ = bar.append(&options_submenu(st.settings, st.zoom));
             let _ = bar.append(&skins_submenu(&skins));
             let _ = bar.append(&vis_submenu(st));
             bar.init_for_nsapp();
@@ -227,6 +229,9 @@ impl Menus {
                 if let Some(v) = num("vis_refresh_") {
                     return Some(VisRefresh(v as u8));
                 }
+                if let Some(v) = num("zoom_") {
+                    return Some(WindowZoom(v as u8));
+                }
                 if let Some(v) = num("milk_auto_") {
                     return Some(MilkAuto(v as u32));
                 }
@@ -297,7 +302,17 @@ fn windows_submenu(st: &MenuState) -> Submenu {
     .expect("menu")
 }
 
-fn options_submenu(s: &Settings) -> Submenu {
+fn zoom_submenu(s: &Settings, zoom: u32) -> Submenu {
+    let m = Submenu::new(t("menu.window_size"), true);
+    let auto = s.window_zoom == 0 && !s.double_size;
+    let _ = m.append(&CheckMenuItem::with_id("zoom_0", t("opt.auto"), true, auto, None));
+    for z in 1..=3u32 {
+        let _ = m.append(&CheckMenuItem::with_id(format!("zoom_{z}"), format!("×{z}"), true, !auto && zoom == z, None));
+    }
+    m
+}
+
+fn options_submenu(s: &Settings, zoom: u32) -> Submenu {
     let lang = Submenu::new(t("menu.language"), true);
     let _ = lang.append(&check("lang_system", "menu.system_language", s.language.is_none()));
     let _ = lang.append(&sep());
@@ -310,7 +325,8 @@ fn options_submenu(s: &Settings) -> Submenu {
         true,
         &[
             &check("on_top", "menu.always_on_top", s.always_on_top),
-            &check("double", "menu.double_size", s.double_size),
+            &check("double", "menu.double_size", zoom >= 2),
+            &zoom_submenu(s, zoom),
             &check("remaining", "menu.time_remaining", s.time_remaining),
             &sep(),
             &check("repeat", "menu.repeat", s.repeat),
@@ -475,7 +491,7 @@ fn build_main(st: &MenuState, skins: &[PathBuf]) -> Menu {
     let _ = m.append(&sep());
     let _ = m.append(&playback_submenu());
     let _ = m.append(&bookmarks_submenu(st));
-    let _ = m.append(&options_submenu(st.settings));
+    let _ = m.append(&options_submenu(st.settings, st.zoom));
     let _ = m.append(&skins_submenu(skins));
     let _ = m.append(&vis_submenu(st));
     let _ = m.append(&sep());

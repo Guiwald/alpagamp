@@ -277,6 +277,8 @@ static TABLE: &[(&str, [&str; 7])] = &[
     ("skins.error", ["Skin Museum unreachable", "Musée des skins injoignable", "Museo de skins inaccesible", "Skin-Museum nicht erreichbar", "Museo delle skin irraggiungibile", "Museu d'aparences inaccessible", "Ní féidir teacht ar an músaem craiceann"]),
     ("skins.none", ["No skin found", "Aucun skin trouvé", "Ningún skin encontrado", "Kein Skin gefunden", "Nessuna skin trovata", "Cap aparença trobada", "Níor aimsíodh craiceann"]),
     ("mobile.milk", ["Full-screen visualization", "Visualisation plein écran", "Visualización a pantalla completa", "Vollbild-Visualisierung", "Visualizzazione a schermo intero", "Visualització a pantalla completa", "Léirshamhlú lánscáileáin"]),
+    ("menu.window_size", ["Window size", "Taille des fenêtres", "Tamaño de las ventanas", "Fenstergröße", "Dimensione delle finestre", "Mida de les finestres", "Méid na bhfuinneog"]),
+    ("opt.auto", ["Automatic (screen)", "Automatique (selon l'écran)", "Automático (según la pantalla)", "Automatisch (nach Bildschirm)", "Automatica (secondo lo schermo)", "Automàtica (segons la pantalla)", "Uathoibríoch (de réir an scáileáin)"]),
     ("error.skin", ["Could not load the skin", "Impossible de charger le skin", "No se pudo cargar el skin", "Skin konnte nicht geladen werden", "Impossibile caricare la skin", "No s'ha pogut carregar l'aparença", "Níorbh fhéidir an craiceann a lódáil"]),
 ];
 

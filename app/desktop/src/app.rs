@@ -1,6 +1,7 @@
 //! L'application de bureau : les fenêtres (principale, égaliseur, playlist, fenêtre générique, Bibliothèque,
 //! visualisation), leurs événements, l'aimantation et les commandes.
 
+mod cursors;
 mod milk;
 mod skins;
 
@@ -24,7 +25,6 @@ use alpagamp_ui::{
     PlaylistView, PlaylistWindow,
 };
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::ModifiersState;
@@ -102,6 +102,9 @@ pub struct App {
     gen_ui: GenWindow,
     lib_ui: LibraryWindow,
     milk: milk::MilkState,
+    /// Agrandissement suggéré par l'écran (×1 à ×3).
+    auto_zoom: u32,
+    cursors: cursors::Cursors,
     skins: alpagamp_museum::Browser,
     spotify: Arc<Spotify>,
     /// Requête de bibliothèque attendue pour la vue affichée.
@@ -191,6 +194,8 @@ impl App {
             gen_ui: GenWindow::new(GenKind::Jump),
             lib_ui: LibraryWindow::default(),
             milk,
+            auto_zoom: 1,
+            cursors: cursors::Cursors::default(),
             skins,
             spotify,
             lib_pending: None,
@@ -246,9 +251,9 @@ impl App {
         }
     }
 
-    /// La double taille s'applique à la fenêtre principale et à l'égaliseur (comme Winamp 2).
-    fn double_for(&self, k: Kind) -> bool {
-        self.player.settings.double_size && matches!(k, Kind::Main | Kind::Eq)
+    /// Agrandissement de toutes les fenêtres (×1 à ×3 ; selon l'écran par défaut).
+    fn zoom(&self) -> u32 {
+        self.player.settings.zoom(self.auto_zoom)
     }
 
     fn title_for(&self, k: Kind) -> String {
@@ -275,8 +280,8 @@ impl App {
                 let s = self.slot(k);
                 match (s.visible(), s.pos, s.win.as_ref()) {
                     (true, Some((x, y)), Some(w)) => {
-                        let (pw, ph) = w.phys_size();
-                        Some(R::new(x, y, pw, ph))
+                        let (lw, lh) = w.layout_size();
+                        Some(R::new(x, y, lw, lh))
                     }
                     _ => None,
                 }
@@ -289,7 +294,7 @@ impl App {
         if s.pos != Some((x, y)) {
             s.pos = Some((x, y));
             if let Some(w) = &s.win {
-                w.window.set_outer_position(PhysicalPosition::new(x, y));
+                w.set_layout_position(x, y);
             }
         }
     }
@@ -315,7 +320,7 @@ impl App {
             skin_size: self.skin_size(k),
             position: self.slot(k).pos,
             on_top: self.player.settings.always_on_top,
-            double: self.double_for(k),
+            user_zoom: self.zoom(),
             secondary: k != Kind::Main,
             owner: owner.as_deref(),
             gpu: k == Kind::Vis,
@@ -323,9 +328,10 @@ impl App {
         match SkinWindow::new(event_loop, opts) {
             Ok(w) => {
                 if self.slot(k).pos.is_none() {
-                    self.slot_mut(k).pos = w.window.outer_position().ok().map(|p| (p.x, p.y));
+                    self.slot_mut(k).pos = w.layout_position();
                 }
                 self.slot_mut(k).win = Some(w);
+                self.apply_shape(k);
             }
             Err(e) => log::error!("fenêtre impossible : {e}"),
         }
@@ -336,23 +342,23 @@ impl App {
     fn default_position(&self, k: Kind) -> Option<(i32, i32)> {
         let (mx, my) = self.slot(Kind::Main).pos?;
         let mw = self.slot(Kind::Main).win.as_ref()?;
-        let mut y = my + mw.phys_size().1;
+        let mut y = my + mw.layout_size().1;
         for other in [Kind::Eq, Kind::Playlist] {
             if other == k {
                 break;
             }
             if let (true, Some(w)) = (self.slot(other).visible(), self.slot(other).win.as_ref()) {
-                y += w.phys_size().1;
+                y += w.layout_size().1;
             }
         }
         if matches!(k, Kind::Gen | Kind::Library | Kind::Vis | Kind::Skins) {
             // La fenêtre générique se met à droite de la visualisation si elle est ouverte.
             if k == Kind::Gen {
                 if let (true, Some((vx, vy)), Some(vw)) = (self.slot(Kind::Vis).visible(), self.slot(Kind::Vis).pos, self.slot(Kind::Vis).win.as_ref()) {
-                    return Some((vx + vw.phys_size().0 + 10, vy));
+                    return Some((vx + vw.layout_size().0 + 10, vy));
                 }
             }
-            let w = mw.phys_size().0;
+            let w = mw.layout_size().0;
             return Some((mx + w + if matches!(k, Kind::Library | Kind::Skins) { 0 } else { 20 }, my));
         }
         Some((mx, y))
@@ -396,17 +402,18 @@ impl App {
     /// les fenêtres collées sous elle ou à sa droite.
     fn relayout(&mut self, k: Kind) {
         let size = self.skin_size(k);
-        let double = self.double_for(k);
+        let zoom = self.zoom();
         let Some(w) = self.slot(k).win.as_ref() else { return };
-        let (nw, nh) = w.phys_size_for(size, double);
+        let (nw, nh) = w.layout_size_for(size, zoom);
         let rects = self.rects();
         if rects[k as usize].is_some() {
             let out = layout::resize(&rects, k as usize, nw, nh);
             self.apply_rects(&out);
         }
         if let Some(w) = self.slot_mut(k).win.as_mut() {
-            w.set_geometry(size, double);
+            w.set_geometry(size, zoom);
         }
+        self.apply_shape(k);
     }
 
     // --- Menus ----------------------------------------------------------------------------------------
@@ -430,6 +437,7 @@ impl App {
             library_open: self.slot(Kind::Library).open,
             spotify_connected: self.spotify.is_connected(),
             milk_open: self.slot(Kind::Vis).open,
+            zoom: self.zoom(),
             pack_installed: alpagamp_milkdrop::pack::installed(&self.paths.presets_dir) || self.milk.pack.busy(),
         }
     }
@@ -502,6 +510,8 @@ impl App {
                     }
                 }
                 self.skin = skin;
+                self.cursors.reset();
+                self.apply_shapes();
                 self.player.settings.skin = Some(stored);
                 self.menus_dirty = true;
             }
@@ -690,6 +700,38 @@ impl App {
         self.command(cmd, event_loop);
     }
 
+    /// Forme du skin (`region.txt`) pour la fenêtre principale et l'égaliseur.
+    fn apply_shape(&self, k: Kind) {
+        use alpagamp_skin::RegionWindow as RW;
+        let which = match k {
+            Kind::Main if self.main_ui.shade => RW::MainShade,
+            Kind::Main => RW::Main,
+            Kind::Eq if self.eq_ui.shade => RW::EqualizerShade,
+            Kind::Eq => RW::Equalizer,
+            _ => return,
+        };
+        if let Some(w) = &self.slot(k).win {
+            crate::shape::set_shape(&w.window, self.skin.regions.get(which), w.zoom, w.user_zoom(), w.skin_size);
+        }
+    }
+
+    fn apply_shapes(&self) {
+        self.apply_shape(Kind::Main);
+        self.apply_shape(Kind::Eq);
+    }
+
+    /// Nouvel agrandissement pour toutes les fenêtres (en gardant le groupe collé).
+    fn set_zoom(&mut self, z: u8) {
+        self.player.settings.window_zoom = z.min(3);
+        self.player.settings.double_size = false;
+        for k in KINDS {
+            if k != Kind::Vis || !self.milk_fullscreen_now() {
+                self.relayout(k);
+            }
+        }
+        self.milk_reset_chrome();
+    }
+
     fn toggle_shade(&mut self, k: Kind) {
         match k {
             Kind::Main => self.main_ui.shade = !self.main_ui.shade,
@@ -717,8 +759,10 @@ impl App {
         if self.slot(k).pos.is_none() {
             return;
         }
-        let mut dx = (x - m.grab.0).round() as i32;
-        let mut dy = (y - m.grab.1).round() as i32;
+        // Déplacement de la souris dans la fenêtre, converti en unités de disposition.
+        let unit = self.slot(k).win.as_ref().map(|w| w.unit()).unwrap_or(1.0);
+        let mut dx = ((x - m.grab.0) / unit).round() as i32;
+        let mut dy = ((y - m.grab.1) / unit).round() as i32;
         if dx == 0 && dy == 0 {
             return;
         }
@@ -730,10 +774,11 @@ impl App {
                 .slot(k)
                 .win
                 .as_ref()
-                .map(|w| w.window.available_monitors().map(|mo| R::new(mo.position().x, mo.position().y, mo.size().width as i32, mo.size().height as i32)).collect())
+                .map(|w| w.window.available_monitors().map(|mo| monitor_rect(&mo)).collect())
                 .unwrap_or_default();
-            let zoom = self.slot(k).win.as_ref().map(|w| w.zoom as i32 / if self.double_for(k) { 2 } else { 1 }).unwrap_or(1);
-            let (sx, sy) = layout::snap(&moving, &targets, &screens, SNAP * zoom.max(1));
+            // Aimantation à 10 pixels skin.
+            let per_skin_px = self.slot(k).win.as_ref().map(|w| w.layout_size().0 / w.skin_size.0.max(1) as i32).unwrap_or(1);
+            let (sx, sy) = layout::snap(&moving, &targets, &screens, SNAP * per_skin_px.max(1));
             dx += sx;
             dy += sy;
         }
@@ -827,6 +872,8 @@ impl App {
             SkinFile(p) => self.load_skin(&p),
             DefaultSkin => {
                 self.skin = self.default_skin.clone();
+                self.cursors.reset();
+                self.apply_shapes();
                 self.player.settings.skin = None;
             }
             ToggleShuffle => self.player.toggle_shuffle(),
@@ -837,10 +884,10 @@ impl App {
             }
             ToggleTimeMode => self.player.settings.time_remaining = !self.player.settings.time_remaining,
             ToggleDoubleSize => {
-                self.player.settings.double_size = !self.player.settings.double_size;
-                self.relayout(Kind::Main);
-                self.relayout(Kind::Eq);
+                let z = if self.zoom() >= 2 { 1 } else { 2 };
+                self.set_zoom(z);
             }
+            WindowZoom(z) => self.set_zoom(z),
             ToggleAlwaysOnTop => {
                 self.player.settings.always_on_top = !self.player.settings.always_on_top;
                 let level = if self.player.settings.always_on_top { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal };
@@ -1138,8 +1185,9 @@ impl App {
             }
         }
         let title = self.title_for(Kind::Gen);
+        let zoom = self.zoom();
         if let Some(w) = self.slot_mut(Kind::Gen).win.as_mut() {
-            w.set_geometry(size, false);
+            w.set_geometry(size, zoom);
             w.window.set_title(&title);
         }
         self.set_open(Kind::Gen, true, event_loop);
@@ -1615,11 +1663,14 @@ impl App {
     /// Ouvre les fenêtres au démarrage.
     fn startup(&mut self, event_loop: &ActiveEventLoop) {
         // Positions enregistrées hors de tout écran (écran débranché) : on laisse le système placer.
+        // Agrandissement suggéré par l'écran principal (en points).
+        if let Some(m) = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next()) {
+            self.auto_zoom = Settings::auto_zoom(m.size().width as f64 / m.scale_factor().max(0.5));
+        }
         if let Some((x, y)) = self.slot(Kind::Main).pos {
             let on_screen = event_loop.available_monitors().any(|m| {
-                let (mx, my) = (m.position().x, m.position().y);
-                let (mw, mh) = (m.size().width as i32, m.size().height as i32);
-                x + 50 > mx && x < mx + mw - 20 && y + 10 > my && y < my + mh - 20
+                let r = monitor_rect(&m);
+                x + 50 > r.x && x < r.x + r.w - 20 && y + 10 > r.y && y < r.y + r.h - 20
             });
             if !on_screen {
                 for s in &mut self.slots {
@@ -1656,6 +1707,13 @@ impl App {
         }
         self.request_redraw();
     }
+}
+
+/// Rectangle d'un écran, en unités de disposition (points sur macOS).
+fn monitor_rect(m: &winit::monitor::MonitorHandle) -> R {
+    let u = if crate::window::POINTS { m.scale_factor().max(0.5) } else { 1.0 };
+    let (p, s) = (m.position(), m.size());
+    R::new((p.x as f64 / u).round() as i32, (p.y as f64 / u).round() as i32, (s.width as f64 / u).round() as i32, (s.height as f64 / u).round() as i32)
 }
 
 /// Nom de l'appareil dans Spotify Connect.
@@ -1720,7 +1778,8 @@ impl ApplicationHandler for App {
             WindowEvent::Moved(p) => {
                 // Position réelle (déplacement par le système, ou confirmation du nôtre) ; pas en plein écran.
                 if self.moving.is_none() && !(k == Kind::Vis && self.milk_fullscreen_now()) {
-                    self.slot_mut(k).pos = Some((p.x, p.y));
+                    let lp = self.slot(k).win.as_ref().map(|w| w.layout_from_physical(p)).unwrap_or((p.x, p.y));
+                    self.slot_mut(k).pos = Some(lp);
                 }
             }
             WindowEvent::Resized(_) if k == Kind::Vis => {
@@ -1732,7 +1791,9 @@ impl ApplicationHandler for App {
                 if let Some(w) = self.slot_mut(k).win.as_mut() {
                     w.rescale();
                 }
+                self.apply_shape(k);
             }
+            WindowEvent::Resized(_) if matches!(k, Kind::Main | Kind::Eq) => self.apply_shape(k),
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::CursorMoved { position, .. } => {
                 self.slot_mut(k).cursor = (position.x, position.y);
@@ -1741,6 +1802,7 @@ impl ApplicationHandler for App {
                     return;
                 }
                 self.mouse_move(k, event_loop);
+                self.update_cursor(k, event_loop);
                 if let Some(w) = &self.slot(k).win {
                     w.window.request_redraw();
                 }

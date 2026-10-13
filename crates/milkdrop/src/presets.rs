@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 
 /// Presets originaux d'Alpagamp (licence MIT, comme le reste du projet).
 pub const BUILTIN: &[(&str, &[u8])] = &[
-    ("Alpagamp - Laine des Andes", include_bytes!("../presets/Alpagamp - Laine des Andes.milk")),
-    ("Alpagamp - Cullera de nuit", include_bytes!("../presets/Alpagamp - Cullera de nuit.milk")),
-    ("Alpagamp - Tunnel du lama", include_bytes!("../presets/Alpagamp - Tunnel du lama.milk")),
-    ("Alpagamp - Étincelles", include_bytes!("../presets/Alpagamp - Étincelles.milk")),
-    ("Alpagamp - Marée", include_bytes!("../presets/Alpagamp - Marée.milk")),
-    ("Alpagamp - Néon", include_bytes!("../presets/Alpagamp - Néon.milk")),
+    ("Alpagamp - Laine des Andes", include_bytes!("../presets/laine-des-andes.milk")),
+    ("Alpagamp - Cullera de nuit", include_bytes!("../presets/cullera-de-nuit.milk")),
+    ("Alpagamp - Tunnel du lama", include_bytes!("../presets/tunnel-du-lama.milk")),
+    ("Alpagamp - Étincelles", include_bytes!("../presets/etincelles.milk")),
+    ("Alpagamp - Marée", include_bytes!("../presets/maree.milk")),
+    ("Alpagamp - Néon", include_bytes!("../presets/neon.milk")),
 ];
 
 #[derive(Clone, Debug, PartialEq)]

@@ -114,6 +114,32 @@ impl MainWindow {
         self.drag.is_some() || self.pressed.is_some()
     }
 
+    /// Curseur du skin pour ce point (nom du fichier `.cur`), comme Winamp 2.
+    pub fn cursor_at(&self, x: i32, y: i32) -> &'static str {
+        let z = self.zone_at(x, y);
+        if self.shade {
+            return match z {
+                Zone::Close => "wsclose.cur",
+                Zone::Minimize => "wsmin.cur",
+                Zone::Shade => "wswinbut.cur",
+                Zone::Position => "wsposbar.cur",
+                Zone::Options => "mainmenu.cur",
+                _ => "wsnormal.cur",
+            };
+        }
+        match z {
+            Zone::Close => "close.cur",
+            Zone::Minimize => "min.cur",
+            Zone::Shade => "winbut.cur",
+            Zone::Options => "mainmenu.cur",
+            Zone::TitleBar => "titlebar.cur",
+            Zone::Position => "posbar.cur",
+            Zone::Volume | Zone::Balance => "volbal.cur",
+            Zone::Marquee => "songname.cur",
+            _ => "normal.cur",
+        }
+    }
+
     fn zone_at(&self, x: i32, y: i32) -> Zone {
         if self.shade {
             return if inside(x, y, 6, 3, 9, 9) {

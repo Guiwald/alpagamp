@@ -157,7 +157,10 @@ pub struct Settings {
     pub repeat: bool,
     pub manual_advance: bool,
     pub time_remaining: bool,
+    /// Ancienne « double taille » (fenêtre principale et égaliseur) ; remplacée par `window_zoom`.
     pub double_size: bool,
+    /// Agrandissement de toutes les fenêtres : 1, 2 ou 3 (0 = selon l'écran).
+    pub window_zoom: u8,
     pub always_on_top: bool,
     /// Chemin du skin choisi (`None` = skin par défaut).
     pub skin: Option<PathBuf>,
@@ -186,6 +189,7 @@ impl Default for Settings {
             manual_advance: false,
             time_remaining: false,
             double_size: false,
+            window_zoom: 0,
             always_on_top: false,
             skin: None,
             eq: EqSettings::default(),
@@ -203,6 +207,26 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Agrandissement des fenêtres ; `auto` : celui que l'écran suggère.
+    pub fn zoom(&self, auto: u32) -> u32 {
+        match self.window_zoom {
+            0 if self.double_size => 2,
+            0 => auto.clamp(1, 3),
+            z => (z as u32).clamp(1, 3),
+        }
+    }
+
+    /// Agrandissement suggéré par la largeur de l'écran (en points) : ×1 sous 1 400, ×2 jusqu'à 2 800, ×3 au-delà.
+    pub fn auto_zoom(screen_width_points: f64) -> u32 {
+        if screen_width_points < 1400.0 {
+            1
+        } else if screen_width_points < 2800.0 {
+            2
+        } else {
+            3
+        }
+    }
+
     /// Charge les réglages ; renvoie les valeurs par défaut si le fichier manque ou est illisible.
     pub fn load(path: &Path) -> Settings {
         match std::fs::read_to_string(path) {
@@ -246,5 +270,18 @@ mod tests {
         assert_eq!(p.volume, 7);
         assert_eq!(p.balance, 0);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn window_zoom() {
+        let mut s = Settings::default();
+        assert_eq!(s.zoom(2), 2);
+        assert_eq!(Settings::auto_zoom(1512.0), 2);
+        assert_eq!(Settings::auto_zoom(1280.0), 1);
+        assert_eq!(Settings::auto_zoom(3840.0), 3);
+        s.double_size = true;
+        assert_eq!(s.zoom(1), 2);
+        s.window_zoom = 3;
+        assert_eq!(s.zoom(1), 3);
     }
 }

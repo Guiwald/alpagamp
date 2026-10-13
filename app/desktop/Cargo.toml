@@ -31,5 +31,16 @@ sys-locale = "0.3"
 muda = "0.21"
 rfd = "0.17"
 
+# Formes de fenêtres des skins (region.txt) : liaisons Rust vers les API du système, sans code C.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow", "NSColor", "objc2-quartz-core"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAShapeLayer", "objc2-core-graphics"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGPath"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+
 [build-dependencies]
 embed-resource = "3"

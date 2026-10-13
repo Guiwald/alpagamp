@@ -7,9 +7,14 @@ use std::rc::Rc;
 
 use alpagamp_skin::Image;
 use alpagamp_ui::text::{TextRun, draw_runs};
-use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowAttributes, WindowLevel};
+
+/// Les positions et tailles de la disposition (aimantation, groupe de fenêtres) sont en **points** sur macOS :
+/// l'espace de coordonnées global y est continu d'un écran à l'autre, même quand leurs densités diffèrent
+/// (Retina ×2 et écran externe ×1). Ailleurs (Windows, Linux), en pixels physiques.
+pub const POINTS: bool = cfg!(target_os = "macos");
 
 pub struct SkinWindow {
     pub window: Rc<Window>,
@@ -23,7 +28,8 @@ pub struct SkinWindow {
     pub zoom: u32,
     /// Taille en pixels skin.
     pub skin_size: (u32, u32),
-    double: bool,
+    /// Agrandissement choisi par l'utilisateur (×1, ×2, ×3), en plus de la densité de l'écran.
+    user_zoom: u32,
 }
 
 /// Options de création.
@@ -32,7 +38,8 @@ pub struct WindowOptions<'a> {
     pub skin_size: (u32, u32),
     pub position: Option<(i32, i32)>,
     pub on_top: bool,
-    pub double: bool,
+    /// Agrandissement choisi (×1, ×2, ×3).
+    pub user_zoom: u32,
     /// Fenêtre secondaire : pas d'entrée dans la barre des tâches (Windows).
     pub secondary: bool,
     /// Fenêtre propriétaire (Windows) : les fenêtres secondaires suivent la principale (réduction, ordre).
@@ -50,7 +57,7 @@ impl SkinWindow {
             .with_visible(false)
             .with_inner_size(PhysicalSize::new(o.skin_size.0, o.skin_size.1));
         if let Some((x, y)) = o.position {
-            attrs = attrs.with_position(PhysicalPosition::new(x, y));
+            attrs = if POINTS { attrs.with_position(LogicalPosition::new(x as f64, y as f64)) } else { attrs.with_position(PhysicalPosition::new(x, y)) };
         }
         if o.on_top {
             attrs = attrs.with_window_level(WindowLevel::AlwaysOnTop);
@@ -83,31 +90,73 @@ impl SkinWindow {
             let surface = softbuffer::Surface::new(&context, window.clone()).map_err(|e| e.to_string())?;
             Some((surface, context))
         };
-        let mut w = SkinWindow { window, soft, gpu: None, fullscreen: false, zoom: 1, skin_size: o.skin_size, double: o.double };
-        w.zoom = w.zoom_for(o.double);
+        let user_zoom = o.user_zoom.clamp(1, 4);
+        let mut w = SkinWindow { window, soft, gpu: None, fullscreen: false, zoom: 1, skin_size: o.skin_size, user_zoom };
+        w.zoom = w.zoom_for(user_zoom);
         w.apply_size();
         w.window.set_visible(true);
         Ok(w)
     }
 
-    /// Agrandissement pour l'écran actuel (Retina ×2) et la double taille.
-    pub fn zoom_for(&self, double: bool) -> u32 {
+    /// Agrandissement en pixels physiques : densité de l'écran (Retina ×2) × choix de l'utilisateur.
+    pub fn zoom_for(&self, user_zoom: u32) -> u32 {
         let sf = self.window.scale_factor();
-        (((sf.round().max(1.0)) as u32) * if double { 2 } else { 1 }).max(1)
+        ((sf.round().max(1.0)) as u32 * user_zoom.max(1)).max(1)
     }
 
-    /// Taille physique qu'aurait la fenêtre avec cette taille skin et ce mode.
-    pub fn phys_size_for(&self, skin_size: (u32, u32), double: bool) -> (i32, i32) {
-        let z = self.zoom_for(double);
+    /// Agrandissement choisi par l'utilisateur.
+    pub fn user_zoom(&self) -> u32 {
+        self.user_zoom
+    }
+
+    /// Pixels physiques par unité de disposition.
+    pub fn unit(&self) -> f64 {
+        if POINTS { self.window.scale_factor() } else { 1.0 }
+    }
+
+    /// Taille (unités de disposition) qu'aurait la fenêtre avec cette taille skin et cet agrandissement.
+    pub fn layout_size_for(&self, skin_size: (u32, u32), user_zoom: u32) -> (i32, i32) {
+        let z = if POINTS { user_zoom.max(1) } else { self.zoom_for(user_zoom) };
         ((skin_size.0 * z) as i32, (skin_size.1 * z) as i32)
     }
 
+    /// Taille actuelle, en unités de disposition.
+    pub fn layout_size(&self) -> (i32, i32) {
+        if self.fullscreen {
+            let s = self.window.inner_size();
+            let u = self.unit();
+            return ((s.width as f64 / u).round() as i32, (s.height as f64 / u).round() as i32);
+        }
+        self.layout_size_for(self.skin_size, self.user_zoom)
+    }
+
+    /// Taille actuelle en pixels physiques.
     pub fn phys_size(&self) -> (i32, i32) {
         if self.fullscreen {
             let s = self.window.inner_size();
             return (s.width as i32, s.height as i32);
         }
         ((self.skin_size.0 * self.zoom) as i32, (self.skin_size.1 * self.zoom) as i32)
+    }
+
+    /// Place la fenêtre (unités de disposition).
+    pub fn set_layout_position(&self, x: i32, y: i32) {
+        if POINTS {
+            self.window.set_outer_position(LogicalPosition::new(x as f64, y as f64));
+        } else {
+            self.window.set_outer_position(PhysicalPosition::new(x, y));
+        }
+    }
+
+    /// Position donnée par le système (pixels physiques) → unités de disposition.
+    pub fn layout_from_physical(&self, p: PhysicalPosition<i32>) -> (i32, i32) {
+        let u = self.unit();
+        ((p.x as f64 / u).round() as i32, (p.y as f64 / u).round() as i32)
+    }
+
+    /// Position actuelle (unités de disposition).
+    pub fn layout_position(&self) -> Option<(i32, i32)> {
+        self.window.outer_position().ok().map(|p| self.layout_from_physical(p))
     }
 
     /// Passe en plein écran (sans bordure, sur l'écran courant) ou en revient.
@@ -128,20 +177,21 @@ impl SkinWindow {
         self.window.request_redraw();
     }
 
-    /// Change la taille skin et/ou le mode double taille.
-    pub fn set_geometry(&mut self, skin_size: (u32, u32), double: bool) {
-        let zoom = self.zoom_for(double);
-        if skin_size != self.skin_size || zoom != self.zoom {
+    /// Change la taille skin et/ou l'agrandissement.
+    pub fn set_geometry(&mut self, skin_size: (u32, u32), user_zoom: u32) {
+        let user_zoom = user_zoom.clamp(1, 4);
+        let zoom = self.zoom_for(user_zoom);
+        if skin_size != self.skin_size || zoom != self.zoom || user_zoom != self.user_zoom {
             self.skin_size = skin_size;
             self.zoom = zoom;
-            self.double = double;
+            self.user_zoom = user_zoom;
             self.apply_size();
         }
     }
 
     /// Après un changement d'écran (facteur d'échelle).
     pub fn rescale(&mut self) {
-        self.zoom = self.zoom_for(self.double);
+        self.zoom = self.zoom_for(self.user_zoom);
         self.apply_size();
     }
 
@@ -150,7 +200,12 @@ impl SkinWindow {
             return;
         }
         let (w, h) = (self.skin_size.0 * self.zoom, self.skin_size.1 * self.zoom);
-        let _ = self.window.request_inner_size(PhysicalSize::new(w, h));
+        if POINTS {
+            let (lw, lh) = (self.skin_size.0 * self.user_zoom, self.skin_size.1 * self.user_zoom);
+            let _ = self.window.request_inner_size(LogicalSize::new(lw as f64, lh as f64));
+        } else {
+            let _ = self.window.request_inner_size(PhysicalSize::new(w, h));
+        }
         if let (Some(nw), Some(nh), Some((surface, _))) = (NonZeroU32::new(w), NonZeroU32::new(h), self.soft.as_mut()) {
             let _ = surface.resize(nw, nh);
         }

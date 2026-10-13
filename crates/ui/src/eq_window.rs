@@ -78,6 +78,16 @@ impl EqWindow {
         self.drag.is_some() || self.pressed.is_some()
     }
 
+    /// Curseur du skin pour ce point (nom du fichier `.cur`).
+    pub fn cursor_at(&self, x: i32, y: i32) -> &'static str {
+        match self.zone_at(x, y) {
+            Zone::Close => "eqclose.cur",
+            Zone::TitleBar => "eqtitle.cur",
+            Zone::Preamp | Zone::Band(_) | Zone::ShadeVolume | Zone::ShadeBalance => "eqslid.cur",
+            _ => "eqnormal.cur",
+        }
+    }
+
     fn zone_at(&self, x: i32, y: i32) -> Zone {
         if self.shade {
             return if inside(x, y, 254, 3, 9, 9) {

@@ -34,6 +34,8 @@ pub enum Command {
     ToggleManualAdvance,
     ToggleTimeMode,
     ToggleDoubleSize,
+    /// Agrandissement de toutes les fenêtres (0 = selon l'écran).
+    WindowZoom(u8),
     ToggleAlwaysOnTop,
     /// Bandeau de la fenêtre qui a le focus (ou de la principale).
     ToggleShade,

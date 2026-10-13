@@ -128,10 +128,16 @@ impl App {
         w.set_fullscreen(on);
         if !on {
             if let Some((x, y)) = self.milk.restore_pos.take() {
-                w.window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+                w.set_layout_position(x, y);
                 self.slots[Kind::Vis as usize].pos = Some((x, y));
             }
         }
+        self.milk.note = None;
+    }
+
+    /// Oublie le cadre déjà envoyé au GPU (après un changement d'agrandissement).
+    pub(super) fn milk_reset_chrome(&mut self) {
+        self.milk.chrome = None;
         self.milk.note = None;
     }
 

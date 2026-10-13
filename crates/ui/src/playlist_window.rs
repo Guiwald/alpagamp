@@ -185,6 +185,27 @@ impl PlaylistWindow {
         }
     }
 
+    /// Curseur du skin pour ce point (nom du fichier `.cur`).
+    pub fn cursor_at(&self, x: i32, y: i32) -> &'static str {
+        let z = self.zone_at(x, y);
+        if self.shade {
+            return match z {
+                Zone::Resize => "pwssize.cur",
+                Zone::Close => "pclose.cur",
+                Zone::Shade => "pwinbut.cur",
+                _ => "pwsnorm.cur",
+            };
+        }
+        match z {
+            Zone::Close => "pclose.cur",
+            Zone::Shade => "pwinbut.cur",
+            Zone::Resize => "psize.cur",
+            Zone::TitleBar => "ptbar.cur",
+            Zone::Scrollbar | Zone::ScrollUp | Zone::ScrollDown => "pvscroll.cur",
+            _ => "pnormal.cur",
+        }
+    }
+
     fn zone_at(&self, x: i32, y: i32) -> Zone {
         let (w, h) = (self.w as i32, self.h as i32);
         if self.shade {

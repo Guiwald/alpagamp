@@ -15,6 +15,12 @@ le composant concerné (« Audio : … »).
 - Visualisation : six presets originaux intégrés ; « Télécharger le pack de presets » installe *Cream of the
   Crop* (9 795 presets, 30 Mo environ) à la demande ; presets personnels dans le dossier des presets.
 - Visualisation : « Choisir un preset » (Alt+K, L) — recherche dans la liste, affichage en un double-clic.
+- Skins : navigateur de skins (Alt+S, menu Skins) — onglet Musée (Winamp Skin Museum : skins mis en avant,
+  recherche, aperçus, un clic télécharge et applique) et onglet Mes skins (aperçus dessinés par Alpagamp) ; aussi
+  sur téléphone (menu › Navigateur de skins), où le skin choisi est gardé.
+- Skins : formes de fenêtres (`region.txt`) sur Windows et macOS ; curseurs de souris des skins (`*.cur`).
+- Interface : Options › Taille des fenêtres (×1, ×2, ×3, automatique selon l'écran) pour toutes les fenêtres ;
+  Ctrl+D (Cmd+D) passe de ×1 à ×2.
 - Téléphone : visualisation en plein écran (menu › Visualisation, ou double-tap sur le visualiseur) : glisser
   pour changer de preset, double-tap pour sortir, appui long pour son menu, bouton Retour.
 - Téléphone : l'écran est composé par la carte graphique (Vulkan), avec repli automatique sur l'affichage
@@ -25,6 +31,9 @@ le composant concerné (« Audio : … »).
   sur GitHub (script, compilation automatique).
 
 ### Corrigé
+- macOS : les fenêtres collées restent collées quand on les déplace d'un écran à l'autre (écrans de densités
+  différentes) — positions tenues en points.
+- macOS : fenêtres trop petites sur les grands écrans (taille automatique selon l'écran).
 - Fenêtres génériques : les titres accentués s'affichent (lettres sans accents de `gen.bmp`).
 
 ## [0.4.0] - 2026-10-13

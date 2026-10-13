@@ -9,6 +9,7 @@
 
 pub mod bmp;
 pub mod config;
+pub mod cursor;
 pub mod default_skin;
 pub use default_skin::app_icon;
 pub mod image;
@@ -19,6 +20,7 @@ use std::collections::HashMap;
 use std::io::Read;
 
 pub use config::{PlEditConfig, RegionWindow, Regions, VisColors};
+pub use cursor::Cursor;
 
 /// Les 22 couleurs de `genex.bmp` (fenêtres génériques : listes, champs, boutons).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +89,8 @@ pub struct Skin {
     pub has_eq_ex: bool,
     /// Planches réellement fournies par le skin (les autres viennent du skin par défaut).
     pub provided: Vec<Sheet>,
+    /// Curseurs du skin (`normal.cur`, `close.cur`…), par nom de fichier en minuscules.
+    pub cursors: HashMap<String, Cursor>,
 }
 
 impl std::fmt::Debug for Skin {
@@ -153,6 +157,7 @@ impl Skin {
             readme: None,
             uses_nums_ex: true,
             has_eq_ex: true,
+            cursors: HashMap::new(),
         }
     }
 
@@ -204,6 +209,7 @@ impl Skin {
         let vis = text("viscolor.txt").map(|t| VisColors::parse(&t, &fallback.vis)).unwrap_or(fallback.vis);
         let pledit = text("pledit.txt").map(|t| PlEditConfig::parse(&t, &fallback.pledit)).unwrap_or_else(|| fallback.pledit.clone());
         let regions = text("region.txt").map(|t| Regions::parse(&t)).unwrap_or_default();
+        let cursors: HashMap<String, Cursor> = files.iter().filter(|(k, _)| k.ends_with(".cur")).filter_map(|(k, b)| Some((k.clone(), cursor::parse_cur(b)?))).collect();
         let readme = ["readme.txt", "read me.txt"]
             .iter()
             .find_map(|f| text(f))
@@ -225,6 +231,7 @@ impl Skin {
             uses_nums_ex,
             has_eq_ex: has(Sheet::EqEx),
             provided,
+            cursors,
         })
     }
 
