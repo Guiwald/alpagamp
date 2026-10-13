@@ -1,12 +1,21 @@
 //! La playlist : entrées, sélection, tri, navigation (aléatoire, répétition, avance manuelle).
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::source::Source;
 
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn new_id() -> u64 {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Une ligne de la playlist.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Entry {
+    /// Identifiant unique pendant l'exécution (suit l'entrée quand la liste est triée ou modifiée).
+    pub id: u64,
     pub source: Source,
     /// Titre affiché (« Artiste - Titre »), s'il est connu.
     pub title: Option<String>,
@@ -17,14 +26,21 @@ pub struct Entry {
     pub meta_loaded: bool,
 }
 
+/// L'identifiant ne compte pas dans la comparaison.
+impl PartialEq for Entry {
+    fn eq(&self, o: &Self) -> bool {
+        self.source == o.source && self.title == o.title && self.duration_ms == o.duration_ms && self.selected == o.selected && self.meta_loaded == o.meta_loaded
+    }
+}
+
 impl Entry {
     pub fn new(source: Source) -> Self {
-        Self { source, title: None, duration_ms: None, selected: false, meta_loaded: false }
+        Self { id: new_id(), source, title: None, duration_ms: None, selected: false, meta_loaded: false }
     }
 
     pub fn with_meta(source: Source, title: Option<String>, duration_ms: Option<u64>) -> Self {
         let meta_loaded = title.is_some();
-        Self { source, title, duration_ms, selected: false, meta_loaded }
+        Self { id: new_id(), source, title, duration_ms, selected: false, meta_loaded }
     }
 
     /// Titre affiché, avec repli sur le nom du fichier.
@@ -61,6 +77,8 @@ pub struct Playlist {
     shuffle_pos: usize,
     /// Ancre des sélections au Shift-clic.
     anchor: Option<usize>,
+    /// Ligne « focus » du clavier.
+    cursor: Option<usize>,
     /// Modifiée depuis le dernier enregistrement.
     pub dirty: bool,
 }
@@ -76,6 +94,11 @@ impl Playlist {
 
     pub fn entry_mut(&mut self, i: usize) -> Option<&mut Entry> {
         self.entries.get_mut(i)
+    }
+
+    /// Index de l'entrée portant cet identifiant.
+    pub fn index_of(&self, id: u64) -> Option<usize> {
+        self.entries.iter().position(|e| e.id == id)
     }
 
     pub fn len(&self) -> usize {
@@ -136,6 +159,7 @@ impl Playlist {
         self.entries.clear();
         self.current = None;
         self.anchor = None;
+        self.cursor = None;
         self.changed();
     }
 
@@ -159,6 +183,7 @@ impl Playlist {
         self.entries = kept;
         self.current = new_current;
         self.anchor = None;
+        self.cursor = self.cursor.filter(|_| !self.entries.is_empty()).map(|c| c.min(self.entries.len() - 1));
         self.changed();
     }
 
@@ -209,6 +234,7 @@ impl Playlist {
         if i >= self.entries.len() {
             return;
         }
+        self.cursor = Some(i);
         if shift {
             let a = self.anchor.unwrap_or(i);
             let (lo, hi) = (a.min(i), a.max(i));
@@ -265,8 +291,46 @@ impl Playlist {
         }
         self.current = tagged.iter().position(|(_, c)| *c);
         self.entries = tagged.into_iter().map(|(e, _)| e).collect();
+        let shift = |v: Option<usize>| v.map(|c| (c as isize + delta).clamp(0, n as isize - 1) as usize);
+        self.cursor = shift(self.cursor);
+        self.anchor = shift(self.anchor);
         self.changed();
         true
+    }
+
+    /// Ligne qui a le focus du clavier.
+    pub fn cursor(&self) -> Option<usize> {
+        self.cursor
+    }
+
+    /// Déplace le focus clavier de `delta` lignes ; sélectionne la ligne (ou la plage depuis l'ancre avec `extend`).
+    pub fn move_cursor(&mut self, delta: isize, extend: bool) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let n = self.entries.len() as isize;
+        let from = self.cursor.or(self.current).map(|c| c as isize).unwrap_or(if delta > 0 { -1 } else { n });
+        let to = (from + delta).clamp(0, n - 1) as usize;
+        if extend {
+            let a = self.anchor.unwrap_or(to);
+            self.select_none();
+            let (lo, hi) = (a.min(to), a.max(to));
+            for e in &mut self.entries[lo..=hi] {
+                e.selected = true;
+            }
+            self.anchor = Some(a);
+        } else {
+            self.select_none();
+            self.entries[to].selected = true;
+            self.anchor = Some(to);
+        }
+        self.cursor = Some(to);
+    }
+
+    /// Retire les doublons (même source), en gardant la première occurrence.
+    pub fn remove_duplicates(&mut self) {
+        let mut seen = HashSet::new();
+        self.retain_by(|e| !seen.insert(e.source.to_playlist_string()));
     }
 
     // --- Tri --------------------------------------------------------------------------------------
@@ -604,5 +668,18 @@ mod tests {
         assert!(t.unknown && t.partial);
         let q = pl(3);
         assert_eq!(q.total_time(), TotalTime { ms: 6000, partial: false, unknown: false });
+    }
+
+    #[test]
+    fn keyboard_cursor_and_duplicates() {
+        let mut p = Playlist::new();
+        p.extend((0..5).map(|i| Entry::new(Source::File(format!("/m/{}.mp3", i % 4).into()))));
+        p.move_cursor(1, false);
+        assert_eq!(p.selected_indices(), vec![1]);
+        p.move_cursor(2, true);
+        assert_eq!(p.selected_indices(), vec![1, 2, 3]);
+        assert_eq!(p.cursor(), Some(3));
+        p.remove_duplicates();
+        assert_eq!(p.len(), 4);
     }
 }
