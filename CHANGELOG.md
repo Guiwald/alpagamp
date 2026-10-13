@@ -6,6 +6,13 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+## [0.3.0] - 2026-10-13
+
+> Mise en service : Windows (`Alpagamp-0.3.0-windows-x64.zip`) — remplacer l'ancien dossier, réglages gardés.
+> Android (`Alpagamp-0.3.0.apk`) — ouvrir le fichier sur le téléphone, autoriser l'installation depuis cette source,
+> installer, puis autoriser l'accès à la musique au premier lancement. Les prochaines versions Android
+> s'installeront par-dessus (même clé de signature).
+
 ### Ajouté
 - Audio : radios Internet (SHOUTcast, Icecast ; HTTP et HTTPS ; MP3, AAC, OGG) avec le titre en cours dans le
   titre défilant et la playlist, le nom de la station dans les infos ; playlists de radios `.pls` / `.m3u`
@@ -17,6 +24,12 @@ le composant concerné (« Audio : … »).
 - Interface : toutes les options du visualiseur — style de l'analyseur (normal, feu, ligne), barres épaisses ou
   fines, crêtes, vitesses de chute, style de l'oscilloscope (points, lignes, plein), fréquence d'affichage.
 - Interface : infos du fichier avec la station et les valeurs ReplayGain.
+- Android : première version (`Alpagamp-0.3.0.apk`) — fenêtre principale, égaliseur et playlist empilés à la
+  largeur de l'écran, au toucher (appui long pour le menu, double-tap pour jouer, glisser pour faire défiler la
+  playlist) ; musique du téléphone (autorisation demandée au premier lancement) ; radios prêtes à écouter et
+  adresses à taper ; mêmes réglages qu'au bureau (égaliseur, fondu enchaîné, ReplayGain, visualiseur, langues).
+- Outils : `cargo xtask apk` (APK signé sans Gradle) et simulateur de téléphone sur ordinateur.
+- Docs : ADR 0017 (Android sans Java).
 
 ### Modifié
 - Réseau : certificats racines du système pris en compte (proxys d'entreprise), mandataire `HTTPS_PROXY`

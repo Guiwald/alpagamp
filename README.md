@@ -11,8 +11,8 @@ visualizations, and soon your Spotify music. English summary below.*
 
 ## État
 
-Préversion **0.2** : fenêtre principale, égaliseur, playlist, fenêtres aimantées, skins classiques, lecture des
-fichiers locaux. Feuille de route vers la 1.0 :
+Préversion **0.3** : fenêtre principale, égaliseur, playlist, fenêtres aimantées, skins classiques, fichiers
+locaux et radios, fondu enchaîné, ReplayGain, première version Android. Feuille de route vers la 1.0 :
 
 | Version | Contenu |
 |---|---|
@@ -35,7 +35,9 @@ Les décisions sont expliquées dans [`docs/adr`](docs/adr/README.md), le vocabu
   complémentaires » puis « Exécuter quand même ».
 - **macOS** : `Alpagamp-X.Y.Z.dmg` (à venir avec la compilation automatique). Application non signée : clic droit
   sur l'application, « Ouvrir », puis « Ouvrir ».
-- **Android** : à partir de la 0.3.
+- **Android** (Pixel 8 et Android 8 ou plus récent, processeur 64 bits) : ouvrir `Alpagamp-X.Y.Z.apk` sur le
+  téléphone, autoriser l'installation depuis cette source, installer. Au premier lancement, autoriser l'accès à la
+  musique. Appui long n'importe où : le menu ; double-tap sur un morceau : le jouer.
 
 ## Utiliser
 
@@ -65,11 +67,13 @@ cargo test --workspace                   # les tests
 cargo xtask render-windows apercu.png    # aperçu des fenêtres (avec un .wsz en second argument)
 cargo build --release --target x86_64-pc-windows-gnu && cargo xtask dist-windows   # paquet Windows (mingw-w64)
 cargo build --release && cargo xtask bundle-mac target/release/alpagamp           # .app et .dmg (sur macOS)
+cargo xtask apk                                                                   # APK (ANDROID_HOME, NDK)
+cargo run -p alpagamp-android --bin phone-sim                                     # simulateur de téléphone
 ```
 
 Organisation : `crates/skin` (skins), `crates/core` (playlist, formats, réglages, langues), `crates/audio` (décodage,
-égaliseur, sortie), `crates/ui` (fenêtres dessinées au pixel près), `app/desktop` (application Mac/Windows/Linux),
-`xtask` (outillage).
+radios, égaliseur, sortie), `crates/ui` (fenêtres dessinées au pixel près), `crates/player` (contrôleur de lecture
+commun), `app/desktop` (Mac, Windows, Linux), `app/android` (téléphone), `xtask` (outillage).
 
 ## English
 
