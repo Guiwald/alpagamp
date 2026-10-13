@@ -51,7 +51,7 @@ if [ -d alpagamp/.git ]; then
 else
   git clone -q -b main "$ICI/alpagamp.bundle" alpagamp
 fi
-git -C alpagamp fetch -q --tags "$ICI/alpagamp.bundle"
+git -C alpagamp fetch -q "$ICI/alpagamp.bundle" 'refs/tags/*:refs/tags/*'
 VERSION="$(cat alpagamp/VERSION)"
 TAG="v$VERSION"
 echo "Alpagamp $VERSION"

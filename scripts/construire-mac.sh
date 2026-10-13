@@ -28,7 +28,7 @@ else
   git clone -q -b main "$ICI/alpagamp.bundle" alpagamp
 fi
 cd alpagamp
-git fetch -q --tags "$ICI/alpagamp.bundle" || true
+git fetch -q "$ICI/alpagamp.bundle" 'refs/tags/*:refs/tags/*' || true
 VERSION="$(cat VERSION)"
 echo "Alpagamp $VERSION"
 
