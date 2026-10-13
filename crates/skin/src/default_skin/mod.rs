@@ -207,21 +207,49 @@ fn button(img: &mut Image, x: i32, y: i32, w: i32, h: i32, pressed: bool) {
 
 /// Tête d'alpaga (logo), 13x15.
 const ALPACA: &[&str] = &[
-    "..oo....oo...",
-    "..ow....wo...",
-    ".owwwwwwwwo..",
-    "owwwwwwwwwwo.",
-    "owwwwwwwwwwo.",
-    ".owewwwwewo..",
-    ".owwwwwwwwo..",
-    "..owwwwwwo...",
-    "..owwnnwwo...",
-    "..owwwwwwo...",
-    "...owwwwo....",
-    "...owwwwo....",
-    "...owwwwo....",
+    "..o.......o..",
+    ".owo.....owo.",
+    ".owooooooowo.",
+    "..owwwwwwwo..",
+    ".owwwwwwwwwo.",
+    ".owewwwwwewo.",
+    "..owwwwwwwo..",
     "...owwwwwo...",
-    "...oooooo....",
+    "...owwnwwo...",
+    "....owwwo....",
+    "....owwwo....",
+    "....owwwo....",
+    "...owwwwwo...",
+    "..owwwwwwwo..",
+    "..ooooooooo..",
+];
+
+/// Alpaga de l'icône (plus détaillé).
+const ALPACA_BIG: &[&str] = &[
+    "...oo........oo...",
+    "...owo......owo...",
+    "...owo......owo...",
+    "...owwo.oo.owwo...",
+    "....owowwwwowo....",
+    "...owwwwwwwwwwo...",
+    "..owwwwwwwwwwwwo..",
+    "..owwwwwwwwwwwwo..",
+    "...owwwwwwwwwwo...",
+    "...owewwwwwwewo...",
+    "...owwwwwwwwwwo...",
+    "....owwwwwwwwo....",
+    "....owwwwwwwwo....",
+    "....owwwwwwwwo....",
+    ".....owwnnwwo.....",
+    ".....owwwwwwo.....",
+    ".....owwmmwwo.....",
+    "......owwwwo......",
+    "......owwwwo......",
+    "......owwwwo......",
+    ".....owwwwwwo.....",
+    "....owwwwwwwwo....",
+    "...owwwwwwwwwwo...",
+    "...oooooooooooo...",
 ];
 
 fn alpaca(img: &mut Image, x: i32, y: i32) {
@@ -1065,4 +1093,89 @@ mod tests {
             assert_eq!(n.get(x, 6), Some(LCD_FG), "pixel {x}");
         }
     }
+}
+
+// --- Icône de l'application ------------------------------------------------------------------------
+
+/// Icône d'Alpagamp, dessinée sur une grille de 64x64 puis agrandie (plus proche voisin) ou réduite
+/// (moyenne) à `size`.
+pub fn app_icon(size: u32) -> Image {
+    let mut base = Image::new(64, 64, 0);
+    // Carré arrondi graphite.
+    let r = 12;
+    for y in 0..64 {
+        for x in 0..64 {
+            let dx = if x < r { r - x } else if x > 63 - r { x - (63 - r) } else { 0 };
+            let dy = if y < r { r - y } else if y > 63 - r { y - (63 - r) } else { 0 };
+            if dx * dx + dy * dy <= r * r {
+                let t = y as f32 / 63.0;
+                base.set(x, y, mix(rgb(0x55, 0x5c, 0x68), rgb(0x22, 0x25, 0x2b), t));
+            }
+        }
+    }
+    // Liseré clair en haut, sombre en bas.
+    for x in r..64 - r {
+        base.set(x, 1, METAL_HI);
+        base.set(x, 62, EDGE);
+    }
+    // Alpaga ×2 (le bas du cou passe derrière l'écran).
+    let aw = ALPACA_BIG[0].len() as i32 * 2;
+    for (ry, row) in ALPACA_BIG.iter().enumerate() {
+        for (rx, ch) in row.chars().enumerate() {
+            let c = match ch {
+                'o' => WOOL_DARK,
+                'w' => WOOL,
+                'e' => EDGE,
+                'n' => rgb(0x8a, 0x5a, 0x4a),
+                'm' => rgb(0x6e, 0x4a, 0x3c),
+                _ => continue,
+            };
+            rect(&mut base, (64 - aw) / 2 + 3 + rx as i32 * 2, 2 + ry as i32 * 2, 2, 2, c);
+        }
+    }
+    // Petit écran LCD avec un spectre menthe.
+    rect(&mut base, 8, 47, 48, 11, LCD_BG);
+    frame(&mut base, 7, 46, 50, 13, EDGE);
+    let heights = [3, 6, 9, 7, 10, 8, 5, 7, 4, 6, 3];
+    for (i, h) in heights.iter().enumerate() {
+        let x = 10 + i as i32 * 4;
+        for k in 0..(*h * 8 / 10) {
+            let c = vis_colors().0[(17 - k * 15 / 8) as usize];
+            hline(&mut base, x, 56 - k, 3, c);
+        }
+    }
+    resize_icon(&base, size)
+}
+
+fn resize_icon(src: &Image, size: u32) -> Image {
+    let mut out = Image::new(size, size, 0);
+    if size >= src.width {
+        let k = size / src.width;
+        for y in 0..size {
+            for x in 0..size {
+                out.set(x as i32, y as i32, src.pixels[((y / k).min(63) * src.width + (x / k).min(63)) as usize]);
+            }
+        }
+        return out;
+    }
+    let k = src.width / size;
+    for y in 0..size {
+        for x in 0..size {
+            let (mut a, mut r, mut g, mut b) = (0u32, 0u32, 0u32, 0u32);
+            for yy in 0..k {
+                for xx in 0..k {
+                    let p = src.pixels[((y * k + yy) * src.width + x * k + xx) as usize];
+                    let pa = p >> 24;
+                    a += pa;
+                    r += ((p >> 16) & 0xFF) * pa;
+                    g += ((p >> 8) & 0xFF) * pa;
+                    b += (p & 0xFF) * pa;
+                }
+            }
+            let n = k * k;
+            let c = if a == 0 { 0 } else { ((a / n) << 24) | ((r / a) << 16) | ((g / a) << 8) | (b / a) };
+            out.set(x as i32, y as i32, c);
+        }
+    }
+    out
 }

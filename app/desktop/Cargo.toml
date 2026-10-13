@@ -1,8 +1,31 @@
 [package]
 name = "alpagamp"
 version = "0.1.0"
+description = "Alpagamp — lecteur de musique à skins classiques"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "alpagamp"
+path = "src/main.rs"
+
 [dependencies]
+alpagamp-skin.workspace = true
+alpagamp-core.workspace = true
+alpagamp-audio.workspace = true
+alpagamp-ui.workspace = true
+log.workspace = true
+env_logger.workspace = true
+winit = "0.30"
+softbuffer = "0.4"
+directories = "6"
+raw-window-handle = "0.6"
+sys-locale = "0.3"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+muda = "0.21"
+rfd = "0.17"
+
+[build-dependencies]
+embed-resource = "3"

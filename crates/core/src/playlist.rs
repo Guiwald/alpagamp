@@ -428,6 +428,30 @@ impl Playlist {
         self.next_index(shuffle, repeat)
     }
 
+    /// Ce que `auto_advance` choisirait, sans rien modifier (pour préparer l'enchaînement sans blanc).
+    /// `None` quand on ne peut pas le prévoir (fin de cycle aléatoire avec remélange).
+    pub fn peek_auto_advance(&self, shuffle: bool, repeat: bool, manual_advance: bool) -> Option<usize> {
+        let n = self.entries.len();
+        if n == 0 {
+            return None;
+        }
+        if manual_advance {
+            return if repeat { self.current } else { None };
+        }
+        if shuffle {
+            if self.shuffle_order.len() != n {
+                return None;
+            }
+            return self.shuffle_order.get(self.shuffle_pos + 1).copied();
+        }
+        match self.current {
+            None => Some(0),
+            Some(c) if c + 1 < n => Some(c + 1),
+            Some(_) if repeat => Some(0),
+            Some(_) => None,
+        }
+    }
+
     /// Remélange partiel en fin de cycle (fenêtre glissante, taux 50 %) : évite de rejouer
     /// immédiatement les derniers morceaux entendus.
     fn morph_shuffle(&mut self) {

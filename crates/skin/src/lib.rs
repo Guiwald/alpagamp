@@ -10,6 +10,7 @@
 pub mod bmp;
 pub mod config;
 pub mod default_skin;
+pub use default_skin::app_icon;
 pub mod image;
 pub mod sprites;
 pub mod text;

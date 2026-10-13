@@ -2,7 +2,7 @@
 
 use alpagamp_core::settings::VisSettings;
 use alpagamp_core::time::display_minutes_seconds;
-use alpagamp_skin::sprites::{self, Sprite};
+use alpagamp_skin::sprites;
 use alpagamp_skin::{Image, Skin};
 
 use crate::marquee::Marquee;

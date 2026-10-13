@@ -1,0 +1,166 @@
+//! Traductions des menus, préférences et messages (les libellés dessinés dans les skins restent tels quels).
+//!
+//! Langues : anglais, français, espagnol, allemand, italien, valencien, irlandais (ADR 0014).
+
+use std::sync::atomic::{AtomicU8, Ordering};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Lang {
+    En = 0,
+    Fr = 1,
+    Es = 2,
+    De = 3,
+    It = 4,
+    /// Valencien (catalan de Valence).
+    Va = 5,
+    /// Irlandais (gaélique).
+    Ga = 6,
+}
+
+impl Lang {
+    pub const ALL: [Lang; 7] = [Lang::En, Lang::Fr, Lang::Es, Lang::De, Lang::It, Lang::Va, Lang::Ga];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Lang::En => "en",
+            Lang::Fr => "fr",
+            Lang::Es => "es",
+            Lang::De => "de",
+            Lang::It => "it",
+            Lang::Va => "ca-valencia",
+            Lang::Ga => "ga",
+        }
+    }
+
+    /// Nom de la langue dans la langue elle-même.
+    pub fn native_name(self) -> &'static str {
+        match self {
+            Lang::En => "English",
+            Lang::Fr => "Français",
+            Lang::Es => "Español",
+            Lang::De => "Deutsch",
+            Lang::It => "Italiano",
+            Lang::Va => "Valencià",
+            Lang::Ga => "Gaeilge",
+        }
+    }
+
+    /// Interprète une étiquette de langue (« fr-FR », « ca-ES-valencia », « ga »…).
+    pub fn from_tag(tag: &str) -> Option<Lang> {
+        let t = tag.to_ascii_lowercase().replace('_', "-");
+        if t.starts_with("ca") {
+            // Le catalan (y compris valencien) est servi par la traduction valencienne.
+            return Some(Lang::Va);
+        }
+        let primary = t.split('-').next().unwrap_or("");
+        Lang::ALL.into_iter().find(|l| l.code() == primary || (primary == "va" && *l == Lang::Va))
+    }
+}
+
+static CURRENT: AtomicU8 = AtomicU8::new(0);
+
+pub fn set_lang(l: Lang) {
+    CURRENT.store(l as u8, Ordering::Relaxed);
+}
+
+pub fn lang() -> Lang {
+    Lang::ALL[CURRENT.load(Ordering::Relaxed) as usize % 7]
+}
+
+/// Traduit une clé ; repli sur l'anglais, puis sur la clé elle-même.
+pub fn t(key: &str) -> &'static str {
+    let l = lang() as usize;
+    match TABLE.iter().find(|(k, _)| *k == key) {
+        Some((_, tr)) => {
+            let s = tr[l];
+            if s.is_empty() { tr[0] } else { s }
+        }
+        None => Box::leak(key.to_string().into_boxed_str()),
+    }
+}
+
+/// (clé, [en, fr, es, de, it, va, ga])
+static TABLE: &[(&str, [&str; 7])] = &[
+    ("menu.play_file", ["Play file…", "Lire un fichier…", "Reproducir archivo…", "Datei abspielen…", "Riproduci file…", "Reproduir fitxer…", "Seinn comhad…"]),
+    ("menu.play_folder", ["Play folder…", "Lire un dossier…", "Reproducir carpeta…", "Ordner abspielen…", "Riproduci cartella…", "Reproduir carpeta…", "Seinn fillteán…"]),
+    ("menu.play_url", ["Play URL…", "Lire une URL…", "Reproducir URL…", "URL abspielen…", "Riproduci URL…", "Reproduir URL…", "Seinn URL…"]),
+    ("menu.file_info", ["File info…", "Infos du fichier…", "Información del archivo…", "Dateiinfo…", "Info file…", "Informació del fitxer…", "Eolas comhaid…"]),
+    ("menu.playback", ["Playback", "Lecture", "Reproducción", "Wiedergabe", "Riproduzione", "Reproducció", "Athsheinm"]),
+    ("menu.previous", ["Previous", "Précédent", "Anterior", "Zurück", "Precedente", "Anterior", "Roimhe seo"]),
+    ("menu.play", ["Play", "Lecture", "Reproducir", "Abspielen", "Riproduci", "Reproduir", "Seinn"]),
+    ("menu.pause", ["Pause", "Pause", "Pausa", "Pause", "Pausa", "Pausa", "Sos"]),
+    ("menu.stop", ["Stop", "Stop", "Detener", "Stopp", "Stop", "Atura", "Stad"]),
+    ("menu.next", ["Next", "Suivant", "Siguiente", "Weiter", "Successivo", "Següent", "Ar aghaidh"]),
+    ("menu.stop_fadeout", ["Stop with fadeout", "Arrêt en fondu", "Detener con fundido", "Stopp mit Ausblenden", "Stop in dissolvenza", "Atura amb fosa", "Stad le céimniú"]),
+    ("menu.stop_after_current", ["Stop after current", "Arrêter après ce morceau", "Detener tras la actual", "Nach aktuellem Titel stoppen", "Ferma dopo il brano", "Atura després de l'actual", "Stad tar éis an rian seo"]),
+    ("menu.back5", ["Back 5 seconds", "Reculer de 5 secondes", "Retroceder 5 segundos", "5 Sekunden zurück", "Indietro di 5 secondi", "Arrere 5 segons", "Siar 5 soicind"]),
+    ("menu.fwd5", ["Forward 5 seconds", "Avancer de 5 secondes", "Avanzar 5 segundos", "5 Sekunden vor", "Avanti di 5 secondi", "Avant 5 segons", "Ar aghaidh 5 soicind"]),
+    ("menu.options", ["Options", "Options", "Opciones", "Optionen", "Opzioni", "Opcions", "Roghanna"]),
+    ("menu.always_on_top", ["Always on top", "Toujours au premier plan", "Siempre visible", "Immer im Vordergrund", "Sempre in primo piano", "Sempre al davant", "I gcónaí ar barr"]),
+    ("menu.double_size", ["Double size", "Double taille", "Tamaño doble", "Doppelte Größe", "Dimensione doppia", "Mida doble", "Méid dhúbailte"]),
+    ("menu.time_remaining", ["Show remaining time", "Afficher le temps restant", "Mostrar tiempo restante", "Restzeit anzeigen", "Mostra tempo rimanente", "Mostra el temps restant", "Taispeáin an t-am atá fágtha"]),
+    ("menu.repeat", ["Repeat", "Répéter", "Repetir", "Wiederholen", "Ripeti", "Repetix", "Athdhéan"]),
+    ("menu.shuffle", ["Shuffle", "Aléatoire", "Aleatorio", "Zufällig", "Casuale", "Aleatori", "Suaitheadh"]),
+    ("menu.manual_advance", ["Manual playlist advance", "Avance manuelle", "Avance manual", "Manueller Titelwechsel", "Avanzamento manuale", "Avanç manual", "Ardú láimhe"]),
+    ("menu.skins", ["Skins", "Skins", "Skins", "Skins", "Skin", "Aparences", "Craicne"]),
+    ("menu.load_skin", ["Load skin…", "Charger un skin…", "Cargar skin…", "Skin laden…", "Carica skin…", "Carrega una aparença…", "Lódáil craiceann…"]),
+    ("menu.default_skin", ["Default skin", "Skin par défaut", "Skin predeterminado", "Standard-Skin", "Skin predefinita", "Aparença per defecte", "Craiceann réamhshocraithe"]),
+    ("menu.visualization", ["Visualization", "Visualisation", "Visualización", "Visualisierung", "Visualizzazione", "Visualització", "Léirshamhlú"]),
+    ("menu.analyzer", ["Spectrum analyzer", "Analyseur de spectre", "Analizador de espectro", "Spektrumanalysator", "Analizzatore di spettro", "Analitzador d'espectre", "Anailíseoir speictrim"]),
+    ("menu.oscilloscope", ["Oscilloscope", "Oscilloscope", "Osciloscopio", "Oszilloskop", "Oscilloscopio", "Oscil·loscopi", "Ascalascóp"]),
+    ("menu.vis_off", ["Off", "Éteint", "Apagado", "Aus", "Spento", "Apagat", "As"]),
+    ("menu.about", ["About Alpagamp", "À propos d'Alpagamp", "Acerca de Alpagamp", "Über Alpagamp", "Informazioni su Alpagamp", "Quant a Alpagamp", "Maidir le Alpagamp"]),
+    ("menu.exit", ["Exit", "Quitter", "Salir", "Beenden", "Esci", "Ix", "Scoir"]),
+    ("menu.language", ["Language", "Langue", "Idioma", "Sprache", "Lingua", "Idioma", "Teanga"]),
+    ("menu.system_language", ["System language", "Langue du système", "Idioma del sistema", "Systemsprache", "Lingua di sistema", "Idioma del sistema", "Teanga an chórais"]),
+    ("dialog.audio_files", ["Audio files", "Fichiers audio", "Archivos de audio", "Audiodateien", "File audio", "Fitxers d'àudio", "Comhaid fuaime"]),
+    ("dialog.playlists", ["Playlists", "Playlists", "Listas de reproducción", "Wiedergabelisten", "Playlist", "Llistes de reproducció", "Seinmliostaí"]),
+    ("dialog.skins", ["Skins", "Skins", "Skins", "Skins", "Skin", "Aparences", "Craicne"]),
+    ("dialog.all_files", ["All files", "Tous les fichiers", "Todos los archivos", "Alle Dateien", "Tutti i file", "Tots els fitxers", "Gach comhad"]),
+    ("about.text", [
+        "Alpagamp {version}\n\nA music player with classic skins, written in Rust.\nNot affiliated with or endorsed by Winamp.\n\nhttps://github.com/Guiwald/alpagamp",
+        "Alpagamp {version}\n\nUn lecteur de musique à skins classiques, écrit en Rust.\nNi affilié à Winamp, ni approuvé par Winamp.\n\nhttps://github.com/Guiwald/alpagamp",
+        "Alpagamp {version}\n\nUn reproductor de música con skins clásicos, escrito en Rust.\nSin relación con Winamp ni respaldado por Winamp.\n\nhttps://github.com/Guiwald/alpagamp",
+        "Alpagamp {version}\n\nEin Musikplayer mit klassischen Skins, geschrieben in Rust.\nWeder mit Winamp verbunden noch von Winamp unterstützt.\n\nhttps://github.com/Guiwald/alpagamp",
+        "Alpagamp {version}\n\nUn lettore musicale con skin classiche, scritto in Rust.\nNon affiliato né approvato da Winamp.\n\nhttps://github.com/Guiwald/alpagamp",
+        "Alpagamp {version}\n\nUn reproductor de música amb aparences clàssiques, escrit en Rust.\nSense relació amb Winamp ni avalat per Winamp.\n\nhttps://github.com/Guiwald/alpagamp",
+        "Alpagamp {version}\n\nSeinnteoir ceoil le craicne clasaiceacha, scríofa in Rust.\nNíl baint aige le Winamp ná formhuinithe ag Winamp.\n\nhttps://github.com/Guiwald/alpagamp",
+    ]),
+    ("info.title", ["File info", "Infos du fichier", "Información del archivo", "Dateiinfo", "Info file", "Informació del fitxer", "Eolas comhaid"]),
+    ("info.artist", ["Artist", "Artiste", "Artista", "Interpret", "Artista", "Artista", "Ealaíontóir"]),
+    ("info.track_title", ["Title", "Titre", "Título", "Titel", "Titolo", "Títol", "Teideal"]),
+    ("info.album", ["Album", "Album", "Álbum", "Album", "Album", "Àlbum", "Albam"]),
+    ("info.year", ["Year", "Année", "Año", "Jahr", "Anno", "Any", "Bliain"]),
+    ("info.genre", ["Genre", "Genre", "Género", "Genre", "Genere", "Gènere", "Seánra"]),
+    ("info.length", ["Length", "Durée", "Duración", "Länge", "Durata", "Durada", "Fad"]),
+    ("info.format", ["Format", "Format", "Formato", "Format", "Formato", "Format", "Formáid"]),
+    ("info.location", ["Location", "Emplacement", "Ubicación", "Ort", "Posizione", "Ubicació", "Suíomh"]),
+    ("error.skin", ["Could not load the skin", "Impossible de charger le skin", "No se pudo cargar el skin", "Skin konnte nicht geladen werden", "Impossibile caricare la skin", "No s'ha pogut carregar l'aparença", "Níorbh fhéidir an craiceann a lódáil"]),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tags_and_fallback() {
+        assert_eq!(Lang::from_tag("fr-FR"), Some(Lang::Fr));
+        assert_eq!(Lang::from_tag("ca-ES-valencia"), Some(Lang::Va));
+        assert_eq!(Lang::from_tag("ga_IE"), Some(Lang::Ga));
+        assert_eq!(Lang::from_tag("ja"), None);
+        set_lang(Lang::De);
+        assert_eq!(t("menu.next"), "Weiter");
+        assert_eq!(t("inconnu.cle"), "inconnu.cle");
+        set_lang(Lang::En);
+    }
+
+    #[test]
+    fn every_entry_has_all_languages() {
+        for (k, tr) in TABLE {
+            for (i, s) in tr.iter().enumerate() {
+                assert!(!s.is_empty(), "{k} manque en {}", Lang::ALL[i].code());
+            }
+        }
+    }
+}
