@@ -336,4 +336,9 @@ pub mod generic {
     pub const MIDDLE_RIGHT: Sprite = s(Gen, 139, 42, 8, 29);
     pub const MIDDLE_RIGHT_BOTTOM: Sprite = s(Gen, 170, 42, 8, 24);
     pub const CLOSE_DOWN: Sprite = s(Gen, 148, 42, 9, 9);
+    /// Bouton des fenêtres génériques (genex.bmp), normal et enfoncé.
+    pub const BUTTON: [Sprite; 2] = [s(GenEx, 0, 0, 47, 15), s(GenEx, 0, 15, 47, 15)];
+    pub const SCROLL_UP: [Sprite; 2] = [s(GenEx, 0, 31, 14, 14), s(GenEx, 28, 31, 14, 14)];
+    pub const SCROLL_DOWN: [Sprite; 2] = [s(GenEx, 14, 31, 14, 14), s(GenEx, 42, 31, 14, 14)];
+    pub const SCROLL_THUMB: [Sprite; 2] = [s(GenEx, 56, 31, 14, 28), s(GenEx, 70, 31, 14, 28)];
 }

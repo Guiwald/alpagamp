@@ -19,6 +19,46 @@ use std::collections::HashMap;
 use std::io::Read;
 
 pub use config::{PlEditConfig, RegionWindow, Regions, VisColors};
+
+/// Les 22 couleurs de `genex.bmp` (fenêtres génériques : listes, champs, boutons).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GenExColors(pub [u32; 22]);
+
+impl GenExColors {
+    pub fn item_bg(&self) -> u32 {
+        self.0[0]
+    }
+    pub fn item_fg(&self) -> u32 {
+        self.0[1]
+    }
+    pub fn window_bg(&self) -> u32 {
+        self.0[2]
+    }
+    pub fn button_text(&self) -> u32 {
+        self.0[3]
+    }
+    pub fn window_text(&self) -> u32 {
+        self.0[4]
+    }
+    pub fn divider(&self) -> u32 {
+        self.0[5]
+    }
+    pub fn playlist_selection(&self) -> u32 {
+        self.0[6]
+    }
+    pub fn scrollbar(&self) -> (u32, u32) {
+        (self.0[13], self.0[14])
+    }
+    pub fn scrollbar_pressed(&self) -> (u32, u32) {
+        (self.0[15], self.0[16])
+    }
+    pub fn scrollbar_dead(&self) -> u32 {
+        self.0[17]
+    }
+    pub fn list_selected(&self) -> (u32, u32) {
+        (self.0[20], self.0[21])
+    }
+}
 pub use image::{Image, rgb};
 pub use sprites::{Sheet, Sprite};
 
@@ -62,6 +102,36 @@ impl Skin {
     }
 
     /// La planche des chiffres effectivement utilisée.
+    /// Couleurs des fenêtres génériques, lues sur la ligne 0 de `genex.bmp`.
+    pub fn genex_colors(&self) -> GenExColors {
+        let img = self.sheet(Sheet::GenEx);
+        let mut c = [0xFF00_0000u32; 22];
+        for (i, v) in c.iter_mut().enumerate() {
+            *v = img.get(48 + 2 * i as i32, 0).unwrap_or(0xFF00_0000) | 0xFF00_0000;
+        }
+        GenExColors(c)
+    }
+
+    /// Lettres A–Z du titre des fenêtres génériques (`gen.bmp`, lignes 88 et 96) : (x, largeur) pour la
+    /// fenêtre active puis inactive. Les lettres sont séparées par la couleur du pixel (0, ligne).
+    pub fn gen_letters(&self) -> [[(i32, i32); 26]; 2] {
+        let img = self.sheet(Sheet::Gen);
+        let mut out = [[(0, 0); 26]; 2];
+        for (k, y) in [88, 96].into_iter().enumerate() {
+            let bg = img.get(0, y);
+            let mut x = 1;
+            for slot in out[k].iter_mut() {
+                let mut end = x;
+                while end < img.width as i32 && img.get(end, y) != bg {
+                    end += 1;
+                }
+                *slot = (x, end - x);
+                x = end + 1;
+            }
+        }
+        out
+    }
+
     pub fn digits_sheet(&self) -> Sheet {
         if self.uses_nums_ex { Sheet::NumsEx } else { Sheet::Numbers }
     }
@@ -325,5 +395,16 @@ mod tests {
         }
         assert_eq!(again.vis, def.vis);
         assert_eq!(again.pledit, def.pledit);
+    }
+
+    #[test]
+    fn gen_letters_have_widths() {
+        let def = Skin::default_skin();
+        let l = def.gen_letters();
+        for k in 0..2 {
+            assert!(l[k].iter().all(|&(_, w)| (2..=6).contains(&w)), "{:?}", l[k]);
+            assert!(l[k][25].0 + l[k][25].1 < 194);
+        }
+        assert_ne!(def.genex_colors().item_bg(), def.genex_colors().item_fg());
     }
 }

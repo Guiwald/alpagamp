@@ -972,13 +972,17 @@ fn gen_bmp() -> Image {
     for (y, active) in [(0, true), (21, false)] {
         let (top, bot) = if active { (rgb(0x5a, 0x61, 0x6d), rgb(0x33, 0x38, 0x40)) } else { (rgb(0x3e, 0x43, 0x4b), rgb(0x2a, 0x2e, 0x34)) };
         let hi = if active { rgb(0x8e, 0x96, 0xa3) } else { rgb(0x5e, 0x64, 0x6e) };
-        for x in [0, 26, 52, 78, 104, 130] {
+        // Pièces : 0 gauche, 26 fin gauche, 52 fond du titre (sans rainures), 78 fin droite, 104 remplissage,
+        // 130 droite. Les rainures s'arrêtent avant le titre.
+        for (x, g0, g1) in [(0, 4, 25), (26, 0, 21), (52, 0, 0), (78, 4, 25), (104, 0, 25), (130, 0, 12)] {
             brushed(&mut img, x, y, 25, 20, top, bot, 61, 4.0);
             hline(&mut img, x, y, 25, EDGE);
             hline(&mut img, x, y + 19, 25, EDGE);
-            for gy in [7, 10] {
-                hline(&mut img, x, y + gy, 25, hi);
-                hline(&mut img, x, y + gy + 1, 25, EDGE);
+            if g1 > g0 {
+                for gy in [7, 10] {
+                    hline(&mut img, x + g0, y + gy, g1 - g0, hi);
+                    hline(&mut img, x + g0, y + gy + 1, g1 - g0, EDGE);
+                }
             }
         }
         vline(&mut img, 0, y, 20, EDGE);
@@ -992,26 +996,34 @@ fn gen_bmp() -> Image {
     }
     vline(&mut img, 0, 42, 14, EDGE);
     vline(&mut img, 124, 57, 14, EDGE);
+    // Côtés : uni (pas de dégradé, pour que les pièces répétées se raccordent).
     for (x, y, w, h) in [(127, 42, 11, 29), (158, 42, 11, 24)] {
-        brushed(&mut img, x, y, w, h, METAL_TOP, METAL_BOT, 71, 3.0);
+        rect(&mut img, x, y, w, h, METAL_BOT);
         vline(&mut img, x, y, h, EDGE);
         vline(&mut img, x + 1, y, h, METAL_HI);
-    }
-    for (x, y, w, h) in [(139, 42, 8, 29), (170, 42, 8, 24)] {
-        brushed(&mut img, x, y, w, h, METAL_TOP, METAL_BOT, 73, 3.0);
         vline(&mut img, x + w - 1, y, h, EDGE);
     }
+    for (x, y, w, h) in [(139, 42, 8, 29), (170, 42, 8, 24)] {
+        rect(&mut img, x, y, w, h, METAL_BOT);
+        vline(&mut img, x, y, h, EDGE);
+        vline(&mut img, x + w - 1, y, h, EDGE);
+    }
+    // Le bas des côtés rejoint le bas de la fenêtre.
+    hline(&mut img, 158, 42 + 23, 11, METAL_LO);
+    hline(&mut img, 170, 42 + 23, 8, METAL_LO);
     win_button(&mut img, 148, 42, ICON_CLOSE, true);
     // Police du titre (lignes 88 actif / 96 inactif) : lettres A–Z à largeur variable, séparées par la
     // couleur de fond prise en (0, ligne).
+    // Chaque lettre occupe une case de fond METAL_BOT ; les cases sont séparées par une colonne EDGE (la couleur
+    // de (0, ligne)), comme dans le format d'origine.
     for (y, color) in [(88, WOOL), (96, WOOL_DIM)] {
-        let bg = METAL_BOT;
-        rect(&mut img, 0, y, 194, 7, bg);
+        rect(&mut img, 0, y, 194, 7, EDGE);
         let mut x = 1;
         for ch in 'A'..='Z' {
-            let g = small(ch);
-            glyph(&mut img, x, y + 1, g, color);
-            x += small_glyph_width(ch) + 1;
+            let w = small_glyph_width(ch) + 1;
+            rect(&mut img, x, y, w, 7, METAL_BOT);
+            glyph(&mut img, x, y + 1, small(ch), color);
+            x += w + 1;
         }
     }
     img
@@ -1040,30 +1052,31 @@ fn genex_bmp() -> Image {
     slider_thumb(&mut img, 70, 31, 14, 28, true);
     slider_thumb(&mut img, 84, 31, 28, 14, false);
     slider_thumb(&mut img, 84, 45, 28, 14, true);
-    // Couleurs sur la ligne 0 (x = 48, 50, … 90) : fond de liste, texte, etc.
+    // Couleurs sur la ligne 0 (x = 48, 50, … 90), dans l'ordre du format (voir `GenExColors`).
+    let sel = rgb(0x1f, 0x4a, 0x38);
     let colors = [
-        LCD_BG,              // fond des éléments
-        LCD_FG,              // texte des éléments
-        WOOL,                // texte de fenêtre
-        rgb(0x2a, 0x2e, 0x35), // couleur de séparation
-        LCD_BG,              // fond d'éditeur
-        LCD_HI,              // texte d'éditeur
-        rgb(0x1f, 0x4a, 0x38), // sélection
-        LCD_HI,              // texte sélectionné
-        rgb(0x1f, 0x4a, 0x38), // sélection inactive
-        LCD_FG,              // texte sélectionné inactif
-        METAL_TOP,           // fond de bouton
-        WOOL,                // texte de bouton
-        METAL_HI,            // clair 3D
-        METAL_LO,            // sombre 3D
-        LCD_FG,              // texte de liste
-        WOOL_DIM,            // texte désactivé
-        LED_ON,              // lien
-        LCD_FG,              // titre
-        LCD_BG,
-        LCD_BG,
-        LCD_BG,
-        LCD_BG,
+        LCD_BG,                // fond des éléments (listes, champs)
+        LCD_FG,                // texte des éléments
+        METAL_BOT,             // fond de fenêtre
+        WOOL,                  // texte des boutons
+        WOOL,                  // texte de fenêtre
+        EDGE,                  // séparateurs et bords creusés
+        sel,                   // sélection dans les listes
+        METAL_TOP,             // fond des en-têtes de liste
+        WOOL,                  // texte des en-têtes
+        METAL_HI,              // cadre d'en-tête haut/gauche
+        METAL_LO,              // cadre d'en-tête bas/droite
+        EDGE,                  // cadre d'en-tête enfoncé
+        METAL_BOT,             // zone morte d'en-tête
+        METAL_TOP,             // barre de défilement 1
+        METAL_LO,              // barre de défilement 2
+        METAL_HI,              // barre enfoncée 1
+        METAL_TOP,             // barre enfoncée 2
+        LCD_BG,                // zone morte de la barre
+        LCD_HI,                // texte surligné
+        sel,                   // fond surligné
+        LCD_HI,                // texte sélectionné
+        sel,                   // fond sélectionné
     ];
     for (i, c) in colors.iter().enumerate() {
         px(&mut img, 48 + 2 * i as i32, 0, *c);
