@@ -215,6 +215,8 @@ static TABLE: &[(&str, [&str; 7])] = &[
     ("vis.full", ["Full", "Pleine", "Completa", "Voll", "Piena", "Completa", "Iomlán"]),
     ("info.station", ["Station", "Station", "Emisora", "Sender", "Emittente", "Emissora", "Stáisiún"]),
     ("info.replaygain", ["ReplayGain", "ReplayGain", "ReplayGain", "ReplayGain", "ReplayGain", "ReplayGain", "ReplayGain"]),
+    ("mobile.phone_music", ["Music on this phone", "Musique du téléphone", "Música del teléfono", "Musik auf dem Telefon", "Musica del telefono", "Música del telèfon", "Ceol ar an bhfón seo"]),
+    ("mobile.radios", ["Radios", "Radios", "Radios", "Radiosender", "Radio", "Ràdios", "Raidió"]),
     ("error.skin", ["Could not load the skin", "Impossible de charger le skin", "No se pudo cargar el skin", "Skin konnte nicht geladen werden", "Impossibile caricare la skin", "No s'ha pogut carregar l'aparença", "Níorbh fhéidir an craiceann a lódáil"]),
 ];
 

@@ -1,5 +1,6 @@
 //! Tâches de développement d'Alpagamp : `cargo xtask <commande>`.
 
+mod apk;
 mod changelog_page;
 
 use std::path::{Path, PathBuf};
@@ -19,9 +20,10 @@ fn main() {
         "bundle-mac" => bundle_mac(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
         "render-main" => render_main(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
         "render-windows" => render_windows(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
+        "apk" => apk::build_apk(),
         _ => {
             eprintln!(
-                "Commandes :\n  skin-sheets <dossier> [skin.wsz]       écrit chaque planche en PNG (×3)\n  export-default-skin <fichier.wsz>      exporte le skin par défaut\n  render-main <sortie.png> [skin.wsz]    aperçu de la fenêtre principale\n  render-windows <sortie.png> [skin.wsz] aperçu des trois fenêtres et de la fenêtre générique\n  icons <dossier>                        icônes PNG, .ico, .icns\n  dist-windows [alpagamp.exe]            paquet zip Windows dans dist/\n  bundle-mac <binaire> [dossier]         Alpagamp.app (+ .dmg sur macOS)\n  changelog-page                         page HTML des versions dans dist/\n  bump patch|minor|major                 nouvelle version"
+                "Commandes :\n  skin-sheets <dossier> [skin.wsz]       écrit chaque planche en PNG (×3)\n  export-default-skin <fichier.wsz>      exporte le skin par défaut\n  render-main <sortie.png> [skin.wsz]    aperçu de la fenêtre principale\n  render-windows <sortie.png> [skin.wsz] aperçu des trois fenêtres et de la fenêtre générique\n  icons <dossier>                        icônes PNG, .ico, .icns\n  dist-windows [alpagamp.exe]            paquet zip Windows dans dist/\n  bundle-mac <binaire> [dossier]         Alpagamp.app (+ .dmg sur macOS)\n  apk                                    APK Android signé dans dist/ (SDK, NDK)\n  changelog-page                         page HTML des versions dans dist/\n  bump patch|minor|major                 nouvelle version"
             );
             Ok(())
         }
@@ -32,7 +34,7 @@ fn main() {
     }
 }
 
-type Res = Result<(), Box<dyn std::error::Error>>;
+pub type Res = Result<(), Box<dyn std::error::Error>>;
 
 fn skin_sheets(out: Option<PathBuf>, wsz: Option<PathBuf>) -> Res {
     let out = out.ok_or("dossier de sortie manquant")?;
@@ -295,7 +297,7 @@ fn bump(kind: Option<&str>) -> Res {
     }
     let new = format!("{}.{}.{}", p[0], p[1], p[2]);
     std::fs::write(root.join("VERSION"), format!("{new}\n"))?;
-    for dir in ["crates/skin", "crates/core", "crates/audio", "crates/ui", "app/desktop"] {
+    for dir in ["crates/skin", "crates/core", "crates/audio", "crates/ui", "crates/player", "app/desktop", "app/android"] {
         let f = root.join(dir).join("Cargo.toml");
         if let Ok(t) = std::fs::read_to_string(&f) {
             std::fs::write(&f, t.replacen(&format!("version = \"{old}\""), &format!("version = \"{new}\""), 1))?;
@@ -310,16 +312,16 @@ fn bump(kind: Option<&str>) -> Res {
 }
 
 /// Version courante (fichier `VERSION`, source unique).
-fn version() -> Result<String, Box<dyn std::error::Error>> {
+pub fn version() -> Result<String, Box<dyn std::error::Error>> {
     Ok(std::fs::read_to_string(workspace_root().join("VERSION"))?.trim().to_string())
 }
 
-fn workspace_root() -> PathBuf {
+pub fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
 
 /// Refuse d'écraser une version déjà produite (une version publiée ne change jamais).
-fn refuse_overwrite(p: &Path) -> Res {
+pub fn refuse_overwrite(p: &Path) -> Res {
     if p.exists() {
         return Err(format!("{} existe déjà : changer de version (cargo xtask bump …)", p.display()).into());
     }
