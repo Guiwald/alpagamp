@@ -11,7 +11,7 @@ classique, lui, est un format de fichier documenté publiquement (Webamp, Skinne
 
 ## Décision
 
-- Le lecteur a **son propre nom** (voir ADR à venir) ; ni « Winamp », ni lama, ni logo éclair copié.
+- Le lecteur a **son propre nom** : Alpagamp (ADR 0009) ; ni « Winamp », ni lama, ni logo éclair copié.
 - **Aucune ligne de code** n'est reprise du code Winamp, ni de code GPL (Audacious) : on lit ces sources pour
   en tirer des faits (dimensions, coordonnées, formats, comportements), puis on écrit notre code.
   Code permissif (MIT/BSD/Apache : Webamp, MilkDrop 2.25c, AVS 2005) : réutilisable avec attribution.

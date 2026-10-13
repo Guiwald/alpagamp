@@ -4,6 +4,7 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 
 | Terme | Sens |
 |---|---|
+| **Alpagamp** | Le lecteur (ADR 0009). |
 | **Fenêtre principale** | La fenêtre de 275×116 avec l'afficheur, les boutons de transport, volume, balance, barre de position. |
 | **Égaliseur** (EQ) | La fenêtre de 275×116 avec les 10 curseurs de bandes et le préampli. |
 | **Playlist** | La fenêtre redimensionnable (pas de 25×29) qui liste les morceaux. Aussi : la liste elle-même. |
@@ -30,3 +31,6 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 | **Chaîne audio** | décodeur → préampli/ReplayGain → égaliseur → limiteur → plugin DSP → sortie (volume, balance). |
 | **Trame de visualisation** | 2 canaux × 576 valeurs de spectre + 2 × 576 échantillons de forme d'onde, envoyés aux visualisations. |
 | **Mode fidèle / mode adapté** | Les deux présentations sur téléphone (ADR 0006). |
+| **Bibliothèque** | La fenêtre qui parcourt Spotify (playlists, titres likés, albums, recherche), les radios et les dossiers locaux (ADR 0010). |
+| **Pack de presets** | *Cream of the Crop*, téléchargé à la demande depuis le dépôt projectM (ADR 0012). |
+| **Navigateur de skins** | La fenêtre (Alt+S) qui cherche et télécharge des skins du Skin Museum (ADR 0012). |

@@ -22,4 +22,4 @@ visualiseur intégré, MilkDrop et plugins DSP s'appliquent à Spotify.
 - librespot casse parfois quand Spotify change son backend (ex. décembre 2025, réparé en 0.8.0) : suivre
   ses versions, isoler son usage derrière une interface pour pouvoir le mettre à jour vite.
 - Aucune publication sur les stores ; installation à la main (APK, DMG, ZIP).
-- Possibilité de rendre le lecteur visible comme **enceinte Spotify Connect** (à trancher).
+- Le lecteur est aussi une **enceinte Spotify Connect** (ADR 0010).
