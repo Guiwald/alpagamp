@@ -16,7 +16,7 @@ mod window;
 use std::path::PathBuf;
 
 fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,symphonia_bundle_mp3=error,symphonia_core=error")).init();
     let args: Vec<PathBuf> = std::env::args_os().skip(1).filter(|a| !a.to_string_lossy().starts_with("-psn_")).map(PathBuf::from).collect();
     let event_loop = match winit::event_loop::EventLoop::new() {
         Ok(e) => e,

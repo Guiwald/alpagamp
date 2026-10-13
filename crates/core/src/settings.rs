@@ -77,6 +77,37 @@ impl Default for VisSettings {
     }
 }
 
+/// Normalisation du volume (ReplayGain).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayGainMode {
+    #[default]
+    Off,
+    Track,
+    Album,
+}
+
+/// Réglages de lecture.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlaybackSettings {
+    pub replay_gain: ReplayGainMode,
+    /// Préampli ReplayGain (dB).
+    pub rg_preamp_db: f32,
+    /// Gain des fichiers sans information ReplayGain (dB).
+    pub rg_untagged_db: f32,
+    /// Limiter le gain grâce aux crêtes connues.
+    pub rg_prevent_clipping: bool,
+    /// Fondu enchaîné entre deux morceaux (0 = enchaînement sans blanc).
+    pub crossfade_ms: u32,
+}
+
+impl Default for PlaybackSettings {
+    fn default() -> Self {
+        Self { replay_gain: ReplayGainMode::Off, rg_preamp_db: 0.0, rg_untagged_db: 0.0, rg_prevent_clipping: true, crossfade_ms: 0 }
+    }
+}
+
 /// Position et état d'une fenêtre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowState {
@@ -106,6 +137,7 @@ pub struct Settings {
     pub skin: Option<PathBuf>,
     pub eq: EqSettings,
     pub vis: VisSettings,
+    pub playback: PlaybackSettings,
     pub main_window: Option<WindowState>,
     pub eq_window: Option<WindowState>,
     pub playlist_window: Option<WindowState>,
@@ -131,6 +163,7 @@ impl Default for Settings {
             skin: None,
             eq: EqSettings::default(),
             vis: VisSettings::default(),
+            playback: PlaybackSettings::default(),
             main_window: None,
             eq_window: None,
             playlist_window: None,

@@ -100,6 +100,7 @@ pub struct App {
     eq_status_shown: bool,
     /// Préréglages d'égaliseur automatiques (nom = nom du fichier du morceau).
     auto_presets: Vec<Preset>,
+    bookmarks: Vec<Entry>,
     started: bool,
     menus_dirty: bool,
     #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -118,6 +119,7 @@ impl App {
             .and_then(|p| std::fs::read(p).ok().and_then(|b| Skin::load_wsz(&p.display().to_string(), &b, &default_skin).ok()))
             .unwrap_or_else(|| default_skin.clone());
         let auto_presets = std::fs::read(&paths.eq_auto).ok().and_then(|b| read_eqf(&b).ok()).unwrap_or_default();
+        let bookmarks = std::fs::read(&paths.bookmarks).ok().map(|b| read_playlist_bytes(&b, paths.bookmarks.parent())).unwrap_or_default();
         let mut player = Player::new(settings);
         if args.is_empty() {
             player.load_playlist_file(&paths.playlist);
@@ -163,6 +165,7 @@ impl App {
             hidden_by_minimize: false,
             eq_status_shown: false,
             auto_presets,
+            bookmarks,
             started: false,
             menus_dirty: false,
             #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -365,6 +368,7 @@ impl App {
             eq_open: self.slot(Kind::Eq).open,
             pl_open: self.slot(Kind::Playlist).open,
             has_auto_preset: name.is_some_and(|n| self.auto_presets.iter().any(|p| p.name == n)),
+            bookmarks: self.bookmarks.iter().map(|e| e.display_title()).collect(),
         }
     }
 
@@ -888,6 +892,66 @@ impl App {
                     }
                 }
             }
+            Crossfade(ms) => {
+                self.player.settings.playback.crossfade_ms = ms;
+                self.player.apply_playback();
+            }
+            ReplayGain(mode) => {
+                self.player.settings.playback.replay_gain = mode;
+                self.player.apply_playback();
+            }
+            RgPreamp(db) => {
+                self.player.settings.playback.rg_preamp_db = db as f32;
+                self.player.apply_playback();
+            }
+            ToggleRgClipping => {
+                let pb = &mut self.player.settings.playback;
+                pb.rg_prevent_clipping = !pb.rg_prevent_clipping;
+                self.player.apply_playback();
+            }
+            AddBookmark => {
+                if let Some(e) = self.player.playlist.current_entry() {
+                    let mut b = Entry::with_meta(e.source.clone(), Some(e.display_title()), e.duration_ms);
+                    b.meta_loaded = true;
+                    if !self.bookmarks.iter().any(|x| x.source == b.source) {
+                        self.bookmarks.push(b);
+                        self.save_bookmarks();
+                    }
+                    self.main_ui.marquee.flash("BOOKMARK ADDED");
+                }
+            }
+            Bookmark(i) => {
+                if let Some(b) = self.bookmarks.get(i).cloned() {
+                    let pl = &mut self.player.playlist;
+                    let idx = match pl.entries().iter().position(|e| e.source == b.source) {
+                        Some(i) => i,
+                        None => {
+                            pl.extend([Entry::with_meta(b.source.clone(), b.title.clone(), b.duration_ms)]);
+                            pl.len() - 1
+                        }
+                    };
+                    self.player.playlist_changed();
+                    self.player.play_index(idx);
+                    self.pl_ui.ensure_visible(idx);
+                }
+            }
+            RemoveBookmark(i) => {
+                if i < self.bookmarks.len() {
+                    self.bookmarks.remove(i);
+                    self.save_bookmarks();
+                }
+            }
+            ClearBookmarks => {
+                self.bookmarks.clear();
+                self.save_bookmarks();
+            }
+            VisAnalyzerStyle(st) => self.player.settings.vis.analyzer_style = st,
+            VisThickBands(b) => self.player.settings.vis.thick_bands = b,
+            ToggleVisPeaks => self.player.settings.vis.peaks = !self.player.settings.vis.peaks,
+            VisFalloff(v) => self.player.settings.vis.falloff = v.min(4),
+            VisPeakFalloff(v) => self.player.settings.vis.peak_falloff = v.min(4),
+            VisScopeStyle(st) => self.player.settings.vis.scope_style = st,
+            VisRefresh(v) => self.player.settings.vis.refresh = v.min(3),
         }
         self.menus_dirty = true;
         self.request_redraw();
@@ -896,6 +960,13 @@ impl App {
     fn edit_playlist(&mut self, f: impl FnOnce(&mut alpagamp_core::Playlist)) {
         f(&mut self.player.playlist);
         self.player.playlist_changed();
+    }
+
+    fn save_bookmarks(&self) {
+        if let Some(dir) = self.paths.bookmarks.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&self.paths.bookmarks, write_m3u(&self.bookmarks, false));
     }
 
     fn save_auto_presets(&self) {
@@ -956,6 +1027,7 @@ impl App {
                 lines.push(format!("{} : {v}", t(k)));
             }
         };
+        add("info.station", info.and_then(|i| i.stream_name.clone()));
         add("info.track_title", info.and_then(|i| i.title.clone()).or_else(|| e.title.clone()));
         add("info.artist", info.and_then(|i| i.artist.clone()));
         add("info.album", info.and_then(|i| i.album.clone()));
@@ -972,6 +1044,17 @@ impl App {
                     i.sample_rate,
                     if i.channels >= 2 { "stereo" } else { "mono" }
                 )
+            }),
+        );
+        add(
+            "info.replaygain",
+            info.and_then(|i| match (i.rg_track_gain, i.rg_album_gain) {
+                (None, None) => None,
+                (track, album) => Some(format!(
+                    "{} {}",
+                    track.map(|g| format!("{} {g:+.2} dB", t("rg.track"))).unwrap_or_default(),
+                    album.map(|g| format!("{} {g:+.2} dB", t("rg.album"))).unwrap_or_default()
+                )),
             }),
         );
         add("info.location", Some(e.source.to_playlist_string()));

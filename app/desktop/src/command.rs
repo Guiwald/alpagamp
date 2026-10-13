@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use alpagamp_core::i18n::Lang;
 use alpagamp_core::playlist::SortKey;
-use alpagamp_core::settings::VisMode;
+use alpagamp_core::settings::{AnalyzerStyle, ReplayGainMode, ScopeStyle, VisMode};
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
@@ -81,6 +81,24 @@ pub enum Command {
     PlCursor(isize, bool),
     /// Déplacer la sélection (Alt+↑/↓).
     PlMoveSelection(isize),
+    // --- Lecture ---
+    Crossfade(u32),
+    ReplayGain(ReplayGainMode),
+    RgPreamp(i32),
+    ToggleRgClipping,
+    // --- Signets ---
+    AddBookmark,
+    Bookmark(usize),
+    RemoveBookmark(usize),
+    ClearBookmarks,
+    // --- Options du visualiseur ---
+    VisAnalyzerStyle(AnalyzerStyle),
+    VisThickBands(bool),
+    ToggleVisPeaks,
+    VisFalloff(u8),
+    VisPeakFalloff(u8),
+    VisScopeStyle(ScopeStyle),
+    VisRefresh(u8),
 }
 
 /// Les menus surgissants.

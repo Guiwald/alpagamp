@@ -6,6 +6,22 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+### Ajouté
+- Audio : radios Internet (SHOUTcast, Icecast ; HTTP et HTTPS ; MP3, AAC, OGG) avec le titre en cours dans le
+  titre défilant et la playlist, le nom de la station dans les infos ; playlists de radios `.pls` / `.m3u`
+  suivies ; mise en mémoire tampon sans bloquer l'interface. Ajout par « Ajouter une adresse » (Ctrl+L), en
+  glissant un lien, ou dans une playlist.
+- Audio : fondu enchaîné réglable (1 à 10 s) entre les morceaux, à puissance constante.
+- Audio : ReplayGain (morceau ou album), préampli, protection contre la saturation.
+- Lecture : signets — ajouter le morceau en cours (Ctrl+Alt+B), les rejouer depuis le menu Signets, les retirer.
+- Interface : toutes les options du visualiseur — style de l'analyseur (normal, feu, ligne), barres épaisses ou
+  fines, crêtes, vitesses de chute, style de l'oscilloscope (points, lignes, plein), fréquence d'affichage.
+- Interface : infos du fichier avec la station et les valeurs ReplayGain.
+
+### Modifié
+- Réseau : certificats racines du système pris en compte (proxys d'entreprise), mandataire `HTTPS_PROXY`
+  respecté ; chiffrement par graviola (Rust, sans C).
+
 ## [0.2.0] - 2026-10-13
 
 > Mise en service : Windows (`Alpagamp-0.2.0-windows-x64.zip`) — fermer Alpagamp, remplacer l'ancien dossier par

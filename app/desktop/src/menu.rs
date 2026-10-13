@@ -7,7 +7,7 @@ use alpagamp_core::Settings;
 use alpagamp_core::eq::factory_presets;
 use alpagamp_core::i18n::{Lang, t};
 use alpagamp_core::playlist::SortKey;
-use alpagamp_core::settings::VisMode;
+use alpagamp_core::settings::{AnalyzerStyle, ReplayGainMode, ScopeStyle, VisMode};
 use muda::{CheckMenuItem, ContextMenu, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
@@ -21,6 +21,8 @@ pub struct MenuState<'a> {
     pub pl_open: bool,
     /// Un préréglage automatique existe pour le morceau courant.
     pub has_auto_preset: bool,
+    /// Titres des signets.
+    pub bookmarks: Vec<String>,
 }
 
 pub struct Menus {
@@ -58,6 +60,7 @@ impl Menus {
             let _ = bar.append(&app);
             let _ = bar.append(&file_submenu());
             let _ = bar.append(&playback_submenu());
+            let _ = bar.append(&bookmarks_submenu(st));
             let _ = bar.append(&windows_submenu(st));
             let _ = bar.append(&options_submenu(st.settings));
             let _ = bar.append(&skins_submenu(&skins));
@@ -156,6 +159,21 @@ impl Menus {
             "pl_load" => PlLoad,
             "pl_info" => PlFileInfo,
             "pl_play" => PlPlaySelected,
+            "rg_off" => ReplayGain(ReplayGainMode::Off),
+            "rg_track" => ReplayGain(ReplayGainMode::Track),
+            "rg_album" => ReplayGain(ReplayGainMode::Album),
+            "rg_clip" => ToggleRgClipping,
+            "bm_add" => AddBookmark,
+            "bm_clear" => ClearBookmarks,
+            "vis_normal" => VisAnalyzerStyle(AnalyzerStyle::Normal),
+            "vis_fire" => VisAnalyzerStyle(AnalyzerStyle::Fire),
+            "vis_line" => VisAnalyzerStyle(AnalyzerStyle::Line),
+            "vis_thick" => VisThickBands(true),
+            "vis_thin" => VisThickBands(false),
+            "vis_peaks" => ToggleVisPeaks,
+            "vis_dots" => VisScopeStyle(ScopeStyle::Dots),
+            "vis_lines" => VisScopeStyle(ScopeStyle::Lines),
+            "vis_solid" => VisScopeStyle(ScopeStyle::Solid),
             other => {
                 if let Some(code) = other.strip_prefix("lang_") {
                     return Lang::ALL.into_iter().find(|l| l.code() == code).map(|l| Language(Some(l)));
@@ -165,6 +183,28 @@ impl Menus {
                 }
                 if let Some(i) = other.strip_prefix("eqp_").and_then(|n| n.parse::<usize>().ok()) {
                     return Some(EqPreset(i));
+                }
+                let num = |p: &str| other.strip_prefix(p).and_then(|n| n.parse::<i64>().ok());
+                if let Some(ms) = num("xfade_") {
+                    return Some(Crossfade(ms as u32));
+                }
+                if let Some(db) = num("rgpre_") {
+                    return Some(RgPreamp(db as i32));
+                }
+                if let Some(i) = num("bm_play_") {
+                    return Some(Bookmark(i as usize));
+                }
+                if let Some(i) = num("bm_del_") {
+                    return Some(RemoveBookmark(i as usize));
+                }
+                if let Some(v) = num("vis_fall_") {
+                    return Some(VisFalloff(v as u8));
+                }
+                if let Some(v) = num("vis_pfall_") {
+                    return Some(VisPeakFalloff(v as u8));
+                }
+                if let Some(v) = num("vis_refresh_") {
+                    return Some(VisRefresh(v as u8));
                 }
                 return None;
             }
@@ -245,10 +285,61 @@ fn options_submenu(s: &Settings) -> Submenu {
             &check("shuffle", "menu.shuffle", s.shuffle),
             &check("manual", "menu.manual_advance", s.manual_advance),
             &sep(),
+            &crossfade_submenu(s),
+            &replaygain_submenu(s),
+            &sep(),
             &lang,
         ],
     )
     .expect("menu")
+}
+
+fn crossfade_submenu(s: &Settings) -> Submenu {
+    let m = Submenu::new(t("menu.crossfade"), true);
+    let cur = s.playback.crossfade_ms;
+    let _ = m.append(&CheckMenuItem::with_id("xfade_0", t("opt.off"), true, cur == 0, None));
+    for secs in [1u32, 2, 3, 5, 8, 10] {
+        let _ = m.append(&CheckMenuItem::with_id(format!("xfade_{}", secs * 1000), format!("{secs} s"), true, cur == secs * 1000, None));
+    }
+    m
+}
+
+fn replaygain_submenu(s: &Settings) -> Submenu {
+    let p = &s.playback;
+    let m = Submenu::new(t("menu.replaygain"), true);
+    let _ = m.append(&CheckMenuItem::with_id("rg_off", t("opt.off"), true, p.replay_gain == ReplayGainMode::Off, None));
+    let _ = m.append(&CheckMenuItem::with_id("rg_track", t("rg.track"), true, p.replay_gain == ReplayGainMode::Track, None));
+    let _ = m.append(&CheckMenuItem::with_id("rg_album", t("rg.album"), true, p.replay_gain == ReplayGainMode::Album, None));
+    let _ = m.append(&sep());
+    let _ = m.append(&check("rg_clip", "rg.prevent_clipping", p.rg_prevent_clipping));
+    let pre = Submenu::new(t("rg.preamp"), true);
+    for db in [-6i32, -3, 0, 3, 6] {
+        let label = format!("{db:+} dB");
+        let _ = pre.append(&CheckMenuItem::with_id(format!("rgpre_{db}"), label, true, (p.rg_preamp_db - db as f32).abs() < 0.01, None));
+    }
+    let _ = m.append(&pre);
+    m
+}
+
+fn bookmarks_submenu(st: &MenuState) -> Submenu {
+    let m = Submenu::new(t("menu.bookmarks"), true);
+    let _ = m.append(&item("bm_add", "bm.add"));
+    let _ = m.append(&sep());
+    if st.bookmarks.is_empty() {
+        let _ = m.append(&MenuItem::with_id("bm_none", t("bm.empty"), false, None));
+    } else {
+        for (i, b) in st.bookmarks.iter().enumerate() {
+            let _ = m.append(&MenuItem::with_id(format!("bm_play_{i}"), b, true, None));
+        }
+        let _ = m.append(&sep());
+        let del = Submenu::new(t("bm.remove"), true);
+        for (i, b) in st.bookmarks.iter().enumerate() {
+            let _ = del.append(&MenuItem::with_id(format!("bm_del_{i}"), b, true, None));
+        }
+        let _ = m.append(&del);
+        let _ = m.append(&item("bm_clear", "bm.clear"));
+    }
+    m
 }
 
 fn skins_submenu(skins: &[PathBuf]) -> Submenu {
@@ -266,13 +357,58 @@ fn skins_submenu(skins: &[PathBuf]) -> Submenu {
 }
 
 fn vis_submenu(s: &Settings) -> Submenu {
+    let v = &s.vis;
+    let style = Submenu::with_items(
+        t("vis.analyzer_style"),
+        true,
+        &[
+            &check("vis_normal", "vis.normal", v.analyzer_style == AnalyzerStyle::Normal),
+            &check("vis_fire", "vis.fire", v.analyzer_style == AnalyzerStyle::Fire),
+            &check("vis_line", "vis.line", v.analyzer_style == AnalyzerStyle::Line),
+            &sep(),
+            &check("vis_thick", "vis.thick", v.thick_bands),
+            &check("vis_thin", "vis.thin", !v.thick_bands),
+            &sep(),
+            &check("vis_peaks", "vis.peaks", v.peaks),
+        ],
+    )
+    .expect("menu");
+    let speeds = |prefix: &str, key: &str, cur: u8| {
+        let m = Submenu::new(t(key), true);
+        for i in 0..5u8 {
+            let _ = m.append(&CheckMenuItem::with_id(format!("{prefix}{i}"), t(&format!("vis.speed{i}")), true, cur == i, None));
+        }
+        m
+    };
+    let fall = speeds("vis_fall_", "vis.falloff", v.falloff);
+    let pfall = speeds("vis_pfall_", "vis.peak_falloff", v.peak_falloff);
+    let scope = Submenu::with_items(
+        t("vis.scope_style"),
+        true,
+        &[
+            &check("vis_dots", "vis.dots", v.scope_style == ScopeStyle::Dots),
+            &check("vis_lines", "vis.lines", v.scope_style == ScopeStyle::Lines),
+            &check("vis_solid", "vis.solid", v.scope_style == ScopeStyle::Solid),
+        ],
+    )
+    .expect("menu");
+    let refresh = Submenu::new(t("vis.refresh"), true);
+    for (i, label) in [t("vis.full"), "1/2", "1/4", "1/8"].into_iter().enumerate() {
+        let _ = refresh.append(&CheckMenuItem::with_id(format!("vis_refresh_{i}"), label, true, v.refresh as usize == i, None));
+    }
     Submenu::with_items(
         t("menu.visualization"),
         true,
         &[
-            &check("vis_analyzer", "menu.analyzer", s.vis.mode == VisMode::Analyzer),
-            &check("vis_scope", "menu.oscilloscope", s.vis.mode == VisMode::Oscilloscope),
-            &check("vis_off", "menu.vis_off", s.vis.mode == VisMode::Off),
+            &check("vis_analyzer", "menu.analyzer", v.mode == VisMode::Analyzer),
+            &check("vis_scope", "menu.oscilloscope", v.mode == VisMode::Oscilloscope),
+            &check("vis_off", "menu.vis_off", v.mode == VisMode::Off),
+            &sep(),
+            &style,
+            &fall,
+            &pfall,
+            &scope,
+            &refresh,
         ],
     )
     .expect("menu")
@@ -290,6 +426,7 @@ fn build_main(st: &MenuState, skins: &[PathBuf]) -> Menu {
     let _ = m.append(&check("win_pl", "menu.playlist_editor", st.pl_open));
     let _ = m.append(&sep());
     let _ = m.append(&playback_submenu());
+    let _ = m.append(&bookmarks_submenu(st));
     let _ = m.append(&options_submenu(st.settings));
     let _ = m.append(&skins_submenu(skins));
     let _ = m.append(&vis_submenu(st.settings));

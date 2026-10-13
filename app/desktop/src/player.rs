@@ -51,7 +51,22 @@ impl Player {
         };
         p.apply_volume();
         p.engine.set_eq(p.settings.eq);
+        p.apply_playback();
         p
+    }
+
+    /// Transmet ReplayGain et fondu enchaîné au moteur.
+    pub fn apply_playback(&self) {
+        use alpagamp_audio::{ReplayGain, ReplayGainMode as M};
+        use alpagamp_core::settings::ReplayGainMode;
+        let pb = &self.settings.playback;
+        let mode = match pb.replay_gain {
+            ReplayGainMode::Off => M::Off,
+            ReplayGainMode::Track => M::Track,
+            ReplayGainMode::Album => M::Album,
+        };
+        self.engine.set_replay_gain(ReplayGain { mode, preamp_db: pb.rg_preamp_db, untagged_db: pb.rg_untagged_db, prevent_clipping: pb.rg_prevent_clipping });
+        self.engine.set_crossfade(pb.crossfade_ms);
     }
 
     fn next_token(&mut self) -> Token {
@@ -154,8 +169,9 @@ impl Player {
         let e = self.playlist.entries().get(i)?;
         match &e.source {
             Source::File(p) => Some(Media::File(p.clone())),
-            // Flux et Spotify arrivent dans les versions suivantes.
-            Source::Url(_) | Source::Spotify(_) => None,
+            Source::Url(u) => Some(Media::Url(u.clone())),
+            // Spotify arrive avec la 0.4.
+            Source::Spotify(_) => None,
         }
     }
 
