@@ -46,6 +46,9 @@ pub enum Command {
     // --- Fenêtres ---
     ToggleEqWindow,
     TogglePlaylistWindow,
+    ToggleLibrary,
+    SpotifyLogin,
+    SpotifyLogout,
     JumpToFile,
     // --- Égaliseur ---
     ToggleEq,

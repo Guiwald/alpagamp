@@ -4,9 +4,12 @@
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use alpagamp_audio::PlayState;
+use alpagamp_audio::{Media, PlayState};
+use alpagamp_core::library::{LibraryItem, LibraryKind};
+use alpagamp_spotify::{ConnectCommand, Event as SpotifyEvent, LibraryRequest, Spotify, Status as SpotifyStatus};
 use alpagamp_core::eq::{CENTER, factory_presets};
 use alpagamp_core::i18n::{self, Lang, t};
 use alpagamp_core::playlist::SortKey;
@@ -17,8 +20,8 @@ use alpagamp_player::Player;
 use alpagamp_skin::{Image, Skin};
 use alpagamp_ui::text::draw_runs_at;
 use alpagamp_ui::{
-    Action, EqView, EqWindow, GenKey, GenKind, GenView, GenWindow, MainWindow, MenuItem, MenuResult, MenuWindow, Mods, PlMenuItem,
-    PlaylistView, PlaylistWindow,
+    Action, EqView, EqWindow, GenKey, GenKind, GenView, GenWindow, LibTab, LibraryAction, LibraryView, LibraryWindow, MainWindow, MenuItem,
+    MenuResult, MenuWindow, Mods, PlMenuItem, PlaylistView, PlaylistWindow,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, TouchPhase, WindowEvent};
@@ -64,6 +67,7 @@ enum MenuKind {
 enum Overlay {
     Gen(GenWindow),
     Menu(MenuWindow, MenuKind),
+    Library,
 }
 
 struct Touch {
@@ -111,6 +115,10 @@ pub struct Mobile {
     eq_ui: EqWindow,
     pl_ui: PlaylistWindow,
     overlay: Option<Overlay>,
+    lib_ui: LibraryWindow,
+    spotify: Arc<Spotify>,
+    lib_pending: Option<u64>,
+    enqueue_pending: Option<u64>,
     fbs: [Image; 4],
     eq_open: bool,
     pl_open: bool,
@@ -146,6 +154,12 @@ impl Mobile {
         apply_language(&settings);
         let mut player = Player::new(settings);
         player.load_playlist_file(&data.join("playlist.m3u8"));
+        let spotify = Arc::new(Spotify::new(data.join("spotify"), "Alpagamp (Android)", true, host.url_opener()));
+        let sp = spotify.clone();
+        player.resolver = Some(Box::new(move |src: &Source| match src {
+            Source::Spotify(uri) => Some(Media::Custom(sp.opener(uri))),
+            _ => None,
+        }));
         let eq_open = player.settings.eq_window.map(|w| w.open).unwrap_or(true);
         let pl_open = player.settings.playlist_window.map(|w| w.open).unwrap_or(true);
         Mobile {
@@ -161,6 +175,10 @@ impl Mobile {
             eq_ui: EqWindow::new(),
             pl_ui: PlaylistWindow::default(),
             overlay: None,
+            lib_ui: LibraryWindow::default(),
+            spotify,
+            lib_pending: None,
+            enqueue_pending: None,
             fbs: [Image::new(1, 1, 0), Image::new(1, 1, 0), Image::new(1, 1, 0), Image::new(1, 1, 0)],
             eq_open,
             pl_open,
@@ -227,6 +245,12 @@ impl Mobile {
             let oh = match o {
                 Overlay::Gen(g) => g.size().1,
                 Overlay::Menu(m, _) => m.size().1,
+                Overlay::Library => {
+                    // La Bibliothèque prend la hauteur disponible.
+                    let avail = ((bottom - top) / scale) as i32;
+                    self.lib_ui.set_height((116 + ((avail - 116) / 29).max(0) * 29) as u32);
+                    self.lib_ui.size().1
+                }
             };
             regions.push((Region::Overlay, top, oh));
         }
@@ -273,6 +297,22 @@ impl Mobile {
             Some(Overlay::Menu(m, _)) => {
                 m.render(&mut self.fbs[3], &self.skin);
                 m.text.clone()
+            }
+            Some(Overlay::Library) => {
+                let status = library_status(&self.spotify, &self.lib_ui, self.lib_pending.is_some());
+                let prompt = if self.lib_ui.tab == LibTab::Radios { t("lib.radio_prompt") } else { t("lib.search_prompt") };
+                let view = LibraryView {
+                    active: true,
+                    title: t("menu.library"),
+                    tabs: [t("lib.tab_playlists"), t("lib.tab_liked"), t("lib.tab_albums"), t("lib.tab_search"), t("lib.tab_radios")],
+                    prompt,
+                    back: t("lib.back"),
+                    play: t("pl.play_item"),
+                    add: t("lib.add"),
+                    status: &status,
+                };
+                self.lib_ui.render(&mut self.fbs[3], &self.skin, &view);
+                self.lib_ui.text.clone()
             }
             None => Vec::new(),
         };
@@ -352,6 +392,18 @@ impl Mobile {
                     Vec::new()
                 }
                 Some(Overlay::Gen(g)) => g.mouse_down(sx, sy),
+                Some(Overlay::Library) => {
+                    if self.lib_ui.in_list(sx, sy) {
+                        list = true;
+                        Vec::new()
+                    } else {
+                        let a = self.lib_ui.mouse_down(sx, sy);
+                        if a.is_empty() && self.lib_ui.tab.has_query() && sy >= 41 && sy < 55 {
+                            self.host.show_keyboard(true);
+                        }
+                        a
+                    }
+                }
                 None => Vec::new(),
             },
         };
@@ -379,7 +431,11 @@ impl Mobile {
                 let rows = t.scroll_acc.trunc();
                 if rows != 0.0 {
                     t.scroll_acc -= rows;
-                    self.pl_ui.scroll_by(rows as isize);
+                    if region == Region::Overlay {
+                        self.lib_ui.scroll_by(rows as isize);
+                    } else {
+                        self.pl_ui.scroll_by(rows as isize);
+                    }
                 }
             }
             return;
@@ -409,6 +465,7 @@ impl Mobile {
                         }
                     }
                     Some(Overlay::Gen(g)) => g.mouse_move(sx, sy),
+                    Some(Overlay::Library) => self.lib_ui.mouse_move(sx, sy),
                     _ => {}
                 }
                 Vec::new()
@@ -426,6 +483,21 @@ impl Mobile {
         let now = Instant::now();
         let double = !t.moved && self.last_tap.is_some_and(|(at, r, lx, ly)| r == t.region && now - at < DOUBLE_TAP && (lx - sx).abs() < 6 && (ly - sy).abs() < 6);
         self.last_tap = if double || t.moved { None } else { Some((now, t.region, sx, sy)) };
+        if t.list && t.region == Region::Overlay {
+            if t.moved || cancelled {
+                return;
+            }
+            if let Some(i) = self.lib_ui.row_at(sx, sy) {
+                let actions = if double { self.lib_ui.activate_row(i) } else {
+                    self.lib_ui.select(i);
+                    Vec::new()
+                };
+                for a in actions {
+                    self.action(Region::Overlay, a, el);
+                }
+            }
+            return;
+        }
         if t.list {
             if t.moved || t.long_done || cancelled {
                 return;
@@ -488,6 +560,7 @@ impl Mobile {
                         }
                         a
                     }
+                    Some(Overlay::Library) => self.lib_ui.mouse_up(sx, sy),
                     None => Vec::new(),
                 }
             }
@@ -531,7 +604,7 @@ impl Mobile {
     // --- Surimpressions ---------------------------------------------------------------------------
 
     fn close_overlay(&mut self) {
-        if matches!(self.overlay, Some(Overlay::Gen(_))) {
+        if matches!(self.overlay, Some(Overlay::Gen(_)) | Some(Overlay::Library)) {
             self.host.show_keyboard(false);
         }
         self.overlay = None;
@@ -579,6 +652,7 @@ impl Mobile {
         xfade.extend([1u32, 2, 3, 5, 8, 10].iter().map(|n| MenuItem::check(&format!("xfade_{}", n * 1000), &format!("{n} s"), pb.crossfade_ms == n * 1000)));
         let radios = RADIOS.iter().enumerate().map(|(i, (name, _))| MenuItem::new(&format!("radio_{i}"), name)).collect();
         vec![
+            MenuItem::new("library", t("menu.library")),
             MenuItem::new("music_scan", t("mobile.phone_music")),
             MenuItem::sub(t("mobile.radios"), radios),
             MenuItem::new("add_url", t("pl.add_url")),
@@ -652,6 +726,7 @@ impl Mobile {
                     ),
                 ],
             ),
+            if self.spotify.is_connected() { MenuItem::new("spotify_logout", t("lib.logout")) } else { MenuItem::new("spotify_login", t("lib.login")) },
             MenuItem::separator(),
             MenuItem::new("about", t("menu.about")),
             MenuItem::new("exit", t("menu.exit")),
@@ -745,6 +820,15 @@ impl Mobile {
         let num = |prefix: &str| id.strip_prefix(prefix).and_then(|n| n.parse::<i64>().ok());
         match id {
             "" => {}
+            "library" => self.open_library(),
+            "spotify_login" => {
+                self.spotify.login();
+                self.open_library();
+            }
+            "spotify_logout" => {
+                self.spotify.logout();
+                self.load_library_tab();
+            }
             "music_scan" => self.scan_music(true),
             "music_scan_add" => self.scan_music(false),
             "add_url" => self.open_gen(GenKind::AddUrl),
@@ -873,6 +957,9 @@ impl Mobile {
     }
 
     fn action(&mut self, from: Region, a: Action, el: &ActiveEventLoop) {
+        if self.connect_transport(&a) {
+            return;
+        }
         let p = &mut self.player;
         match a {
             Action::Previous(_) => p.previous(),
@@ -961,11 +1048,19 @@ impl Mobile {
             }
             Action::SubmitUrl(url) => {
                 self.close_overlay();
-                self.player.playlist.extend([Entry::new(Source::parse(&url, None))]);
-                self.player.playlist_changed();
-                let last = self.player.playlist.len() - 1;
-                self.player.play_index(last);
+                match Source::parse(&url, None) {
+                    Source::Spotify(uri) if !uri.starts_with("spotify:track:") && !uri.starts_with("spotify:episode:") => {
+                        self.enqueue_pending = Some(self.spotify.request(LibraryRequest::Tracks(uri)));
+                    }
+                    src => {
+                        self.player.playlist.extend([Entry::new(src)]);
+                        self.player.playlist_changed();
+                        let last = self.player.playlist.len() - 1;
+                        self.player.play_index(last);
+                    }
+                }
             }
+            Action::Library(la) => self.library_action(la),
         }
     }
 
@@ -979,6 +1074,151 @@ impl Mobile {
         for a in actions {
             self.action(Region::Overlay, a, el);
         }
+    }
+
+    // --- Bibliothèque et Spotify -----------------------------------------------------------------
+
+    fn open_library(&mut self) {
+        self.overlay = Some(Overlay::Library);
+        if self.lib_ui.items().is_empty() {
+            self.load_library_tab();
+        }
+    }
+
+    fn load_library_tab(&mut self) {
+        let tab = self.lib_ui.tab;
+        self.lib_pending = None;
+        let connected = self.spotify.is_connected();
+        let req = match tab {
+            LibTab::Radios => Some(LibraryRequest::RadioTop),
+            LibTab::Search => None,
+            _ if !connected => None,
+            LibTab::Playlists => Some(LibraryRequest::Playlists { liked_label: t("lib.liked_title").to_string() }),
+            LibTab::Liked => Some(LibraryRequest::Tracks("spotify:collection".into())),
+            LibTab::Albums => Some(LibraryRequest::Albums),
+        };
+        let mut items = Vec::new();
+        if tab != LibTab::Radios && !connected && !matches!(self.spotify.status(), SpotifyStatus::Authorizing | SpotifyStatus::Connecting) {
+            items.push(LibraryItem::new(LibraryKind::Action, t("lib.login"), "", "action:login"));
+        }
+        self.lib_ui.set_items(items);
+        if let Some(r) = req {
+            self.lib_pending = Some(self.spotify.request(r));
+        }
+    }
+
+    fn library_action(&mut self, a: LibraryAction) {
+        match a {
+            LibraryAction::Tab(_) => self.load_library_tab(),
+            LibraryAction::Open(item) => {
+                self.lib_ui.push(&item.title, Vec::new());
+                self.lib_pending = Some(self.spotify.request(LibraryRequest::Tracks(item.uri)));
+            }
+            LibraryAction::Search { tab, query } => {
+                self.host.show_keyboard(false);
+                self.lib_ui.set_items(Vec::new());
+                let r = if tab == LibTab::Radios { LibraryRequest::RadioSearch(query) } else { LibraryRequest::Search(query) };
+                if tab == LibTab::Radios || self.spotify.is_connected() {
+                    self.lib_pending = Some(self.spotify.request(r));
+                } else {
+                    self.load_library_tab();
+                }
+            }
+            LibraryAction::Activate(item) => {
+                if item.uri == "action:login" {
+                    self.spotify.login();
+                    self.load_library_tab();
+                }
+            }
+            LibraryAction::Play { items, start } => {
+                let entries: Vec<Entry> = items.iter().map(library_entry).collect();
+                if entries.is_empty() {
+                    return;
+                }
+                self.close_overlay();
+                self.player.stop();
+                self.player.playlist.clear();
+                self.player.playlist.extend(entries);
+                self.player.playlist_changed();
+                self.player.play_index(start.min(self.player.playlist.len() - 1));
+            }
+            LibraryAction::Enqueue(items) => {
+                self.player.playlist.extend(items.iter().map(library_entry));
+                self.player.playlist_changed();
+                self.main_ui.marquee.flash(&format!("+{}", items.len()));
+            }
+        }
+    }
+
+    fn spotify_events(&mut self) {
+        for ev in self.spotify.poll_events() {
+            match ev {
+                SpotifyEvent::Status(_) => {
+                    if self.lib_ui.tab != LibTab::Radios && matches!(self.overlay, Some(Overlay::Library)) {
+                        self.load_library_tab();
+                    }
+                }
+                SpotifyEvent::ConnectStart => self.player.play_external(Media::Custom(self.spotify.connect_opener()), "Spotify Connect"),
+                SpotifyEvent::ConnectPause => {
+                    if self.player.is_external() {
+                        self.player.engine.pause();
+                    }
+                }
+                SpotifyEvent::ConnectResume => {
+                    if self.player.is_external() {
+                        self.player.engine.resume();
+                    }
+                }
+                SpotifyEvent::ConnectStop => {
+                    if self.player.is_external() {
+                        self.player.stop();
+                    }
+                }
+                SpotifyEvent::Library { request, result } if self.enqueue_pending == Some(request) => {
+                    self.enqueue_pending = None;
+                    if let Ok(items) = result {
+                        self.player.playlist.extend(items.iter().filter(|i| i.is_playable()).map(library_entry));
+                        self.player.playlist_changed();
+                    }
+                }
+                SpotifyEvent::Library { request, result } => {
+                    if self.lib_pending == Some(request) {
+                        self.lib_pending = None;
+                        match result {
+                            Ok(items) if items.is_empty() => self.lib_ui.set_items(vec![LibraryItem::info(t("lib.empty"))]),
+                            Ok(items) => self.lib_ui.set_items(items),
+                            Err(e) => self.lib_ui.set_items(vec![LibraryItem::info(e)]),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Spotify Connect pilote la lecture : les boutons de transport s'adressent à lui.
+    fn connect_transport(&mut self, a: &Action) -> bool {
+        if !self.player.is_external() {
+            return false;
+        }
+        match a {
+            Action::Previous(_) => self.spotify.connect_command(ConnectCommand::Previous),
+            Action::Next(_) => self.spotify.connect_command(ConnectCommand::Next),
+            Action::Pause => {
+                if self.player.state() == PlayState::Paused {
+                    self.spotify.connect_command(ConnectCommand::Play);
+                    self.player.engine.resume();
+                } else {
+                    self.spotify.connect_command(ConnectCommand::Pause);
+                    self.player.engine.pause();
+                }
+            }
+            Action::Play(_) => {
+                self.spotify.connect_command(ConnectCommand::Play);
+                self.player.engine.resume();
+            }
+            _ => return false,
+        }
+        true
     }
 
     /// Taille de fenêtre voulue (simulateur ; ignorée sur téléphone).
@@ -1007,6 +1247,30 @@ impl Mobile {
         }
         w.request_redraw();
     }
+}
+
+fn library_status(sp: &Spotify, lib: &LibraryWindow, loading: bool) -> String {
+    if loading {
+        return t("lib.loading").to_string();
+    }
+    if lib.tab == LibTab::Radios {
+        return String::new();
+    }
+    match sp.status() {
+        SpotifyStatus::LoggedOut => String::new(),
+        SpotifyStatus::Authorizing => t("lib.authorizing").to_string(),
+        SpotifyStatus::Connecting => t("lib.connecting").to_string(),
+        SpotifyStatus::Connected { user } => format!("Spotify : {user}"),
+        SpotifyStatus::Failed(e) => format!("Spotify : {e}"),
+    }
+}
+
+/// Entrée de playlist pour un élément de la Bibliothèque.
+fn library_entry(it: &LibraryItem) -> Entry {
+    let title = if it.kind == LibraryKind::Radio { it.title.clone() } else { it.playlist_title() };
+    let mut e = Entry::with_meta(Source::parse(&it.uri, None), Some(title), it.duration_ms);
+    e.meta_loaded = true;
+    e
 }
 
 fn time_text(player: &Player) -> String {
@@ -1104,7 +1368,13 @@ impl ApplicationHandler for Mobile {
                     Key::Character(c) => Some(GenKey::Text(event.text.as_ref().map(|t| t.to_string()).unwrap_or_else(|| c.to_string()))),
                     _ => event.text.as_ref().map(|t| GenKey::Text(t.to_string())),
                 };
-                if let (true, Some(k)) = (gen_open, key) {
+                if matches!(self.overlay, Some(Overlay::Library)) {
+                    if let Some(k) = key {
+                        for a in self.lib_ui.key(k) {
+                            self.action(Region::Overlay, a, el);
+                        }
+                    }
+                } else if let (true, Some(k)) = (gen_open, key) {
                     self.gen_key(k, el);
                 }
                 if let Some(w) = &self.window {
@@ -1120,6 +1390,7 @@ impl ApplicationHandler for Mobile {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        self.spotify_events();
         self.player.tick();
         if self.player.take_track_changed().is_some() {
             if let Some(i) = self.player.playlist.current() {

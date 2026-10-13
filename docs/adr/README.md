@@ -22,3 +22,4 @@ effacée : sa fiche passe au statut « remplacée par ADR n » et reste là.
 | [0015](0015-youtube-music-et-son-systeme.md) | YouTube Music : son du système en 1.1, intégration complète plus tard | acceptée |
 | [0016](0016-fenetres-et-formes.md) | Fenêtres : groupe aimanté, fenêtres génériques skinnées, formes reportées | acceptée |
 | [0017](0017-android-sans-java.md) | Android : NativeActivity sans Java, APK construit sans Gradle | acceptée |
+| [0018](0018-spotify-dans-le-moteur.md) | Spotify dans le moteur ; TLS de librespot (écart pour Android) | acceptée |

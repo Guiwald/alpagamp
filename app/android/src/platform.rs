@@ -55,6 +55,20 @@ pub fn request_music_permission(app: &AndroidApp) {
     });
 }
 
+/// Ouvre une adresse dans le navigateur (Intent ACTION_VIEW).
+pub fn open_url(app: &AndroidApp, url: &str) {
+    with_env(app, |env, activity| {
+        let jurl = env.new_string(url)?;
+        let uri = env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&jurl)])?.l()?;
+        let action = env.new_string("android.intent.action.VIEW")?;
+        let intent = env.new_object("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V", &[JValue::Object(&action), JValue::Object(&uri)])?;
+        // FLAG_ACTIVITY_NEW_TASK
+        env.call_method(&intent, "addFlags", "(I)Landroid/content/Intent;", &[JValue::Int(0x1000_0000)])?;
+        env.call_method(activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)])?;
+        Ok(())
+    });
+}
+
 /// Ferme l'activité.
 pub fn finish(app: &AndroidApp) {
     with_env(app, |env, activity| {

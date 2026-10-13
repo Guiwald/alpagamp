@@ -23,6 +23,8 @@ pub struct MenuState<'a> {
     pub has_auto_preset: bool,
     /// Titres des signets.
     pub bookmarks: Vec<String>,
+    pub library_open: bool,
+    pub spotify_connected: bool,
 }
 
 pub struct Menus {
@@ -130,6 +132,9 @@ impl Menus {
             "lang_system" => Language(None),
             "win_eq" => ToggleEqWindow,
             "win_pl" => TogglePlaylistWindow,
+            "win_lib" => ToggleLibrary,
+            "spotify_login" => SpotifyLogin,
+            "spotify_logout" => SpotifyLogout,
             "jump" => JumpToFile,
             "eq_on" => ToggleEq,
             "eq_auto" => ToggleEqAuto,
@@ -262,7 +267,12 @@ fn playback_submenu() -> Submenu {
 
 #[cfg(target_os = "macos")]
 fn windows_submenu(st: &MenuState) -> Submenu {
-    Submenu::with_items(t("menu.windows"), true, &[&check("win_eq", "menu.equalizer", st.eq_open), &check("win_pl", "menu.playlist_editor", st.pl_open)]).expect("menu")
+    Submenu::with_items(
+        t("menu.windows"),
+        true,
+        &[&check("win_eq", "menu.equalizer", st.eq_open), &check("win_pl", "menu.playlist_editor", st.pl_open), &check("win_lib", "menu.library", st.library_open)],
+    )
+    .expect("menu")
 }
 
 fn options_submenu(s: &Settings) -> Submenu {
@@ -292,6 +302,16 @@ fn options_submenu(s: &Settings) -> Submenu {
         ],
     )
     .expect("menu")
+}
+
+fn spotify_submenu(st: &MenuState) -> Submenu {
+    let m = Submenu::new("Spotify", true);
+    if st.spotify_connected {
+        let _ = m.append(&item("spotify_logout", "lib.logout"));
+    } else {
+        let _ = m.append(&item("spotify_login", "lib.login"));
+    }
+    m
 }
 
 fn crossfade_submenu(s: &Settings) -> Submenu {
@@ -424,6 +444,8 @@ fn build_main(st: &MenuState, skins: &[PathBuf]) -> Menu {
     let _ = m.append(&sep());
     let _ = m.append(&check("win_eq", "menu.equalizer", st.eq_open));
     let _ = m.append(&check("win_pl", "menu.playlist_editor", st.pl_open));
+    let _ = m.append(&check("win_lib", "menu.library", st.library_open));
+    let _ = m.append(&spotify_submenu(st));
     let _ = m.append(&sep());
     let _ = m.append(&playback_submenu());
     let _ = m.append(&bookmarks_submenu(st));

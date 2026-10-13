@@ -14,6 +14,8 @@ pub trait Host {
     fn music_dirs(&self) -> Vec<PathBuf>;
     /// Dossier des réglages et de la playlist.
     fn data_dir(&self) -> PathBuf;
+    /// Fonction qui ouvre une adresse dans le navigateur (connexion à Spotify).
+    fn url_opener(&self) -> Box<dyn Fn(&str) + Send + Sync>;
 }
 
 #[cfg(target_os = "android")]
@@ -44,6 +46,10 @@ impl Host for AndroidHost {
     fn data_dir(&self) -> PathBuf {
         crate::platform::data_dir(&self.0)
     }
+    fn url_opener(&self) -> Box<dyn Fn(&str) + Send + Sync> {
+        let app = self.0.clone();
+        Box::new(move |u: &str| crate::platform::open_url(&app, u))
+    }
 }
 
 /// Simulateur de téléphone sur ordinateur (développement) : `ALPAGAMP_SIM_MUSIC` = dossier de musique.
@@ -68,5 +74,12 @@ impl Host for SimHost {
     }
     fn data_dir(&self) -> PathBuf {
         std::env::temp_dir().join("alpagamp-phone-sim")
+    }
+    fn url_opener(&self) -> Box<dyn Fn(&str) + Send + Sync> {
+        Box::new(|u: &str| {
+            if std::process::Command::new("xdg-open").arg(u).spawn().is_err() {
+                log::info!("ouvrir : {u}");
+            }
+        })
     }
 }

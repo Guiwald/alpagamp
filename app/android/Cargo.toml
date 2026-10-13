@@ -18,6 +18,7 @@ alpagamp-core.workspace = true
 alpagamp-audio.workspace = true
 alpagamp-ui.workspace = true
 alpagamp-player.workspace = true
+alpagamp-spotify.workspace = true
 log.workspace = true
 
 winit = "0.30"

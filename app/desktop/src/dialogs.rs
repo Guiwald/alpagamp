@@ -106,3 +106,16 @@ pub fn pick_eqf() -> Option<PathBuf> {
 pub fn save_eqf() -> Option<PathBuf> {
     None
 }
+
+/// Ouvre une adresse dans le navigateur.
+pub fn open_url(url: &str) {
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let r = std::process::Command::new("xdg-open").arg(url).spawn();
+    if let Err(e) = r {
+        log::warn!("navigateur : {e} — ouvrir à la main : {url}");
+    }
+}

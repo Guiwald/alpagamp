@@ -6,6 +6,18 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+### Ajouté
+- Spotify : connexion en un clic (navigateur, sans configuration), gardée d'une session à l'autre ; lecture des
+  morceaux Spotify dans la chaîne audio d'Alpagamp (égaliseur, visualiseur, fondu enchaîné), 320 kbit/s ;
+  liens `open.spotify.com` et URI `spotify:` dans la playlist (les liens de playlists et d'albums ajoutent leurs
+  morceaux). Spotify Premium nécessaire.
+- Spotify Connect : Alpagamp apparaît comme appareil dans l'appli Spotify (« Alpagamp (Mac) », « Alpagamp
+  (Android) »…) ; ce qui y est lancé passe par Alpagamp, et les boutons de transport pilotent Spotify.
+- Interface : Bibliothèque (Alt+L) — onglets Playlists (avec Titres likés), Likés, Albums, Recherche et
+  Radios (annuaire radio-browser.info, recherche par nom ou genre) ; double-clic pour ouvrir ou jouer, boutons
+  Lire et Ajouter. Sur téléphone, dans le menu.
+- Docs : ADR 0018 (Spotify dans le moteur, TLS de librespot).
+
 ## [0.3.0] - 2026-10-13
 
 > Mise en service : Windows (`Alpagamp-0.3.0-windows-x64.zip`) — remplacer l'ancien dossier, réglages gardés.

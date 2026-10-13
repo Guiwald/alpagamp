@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 
 pub struct Paths {
-    #[allow(dead_code)]
     pub config_dir: PathBuf,
     pub settings: PathBuf,
     pub playlist: PathBuf,

@@ -2,6 +2,7 @@
 //! événements, l'aimantation et les commandes.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use alpagamp_audio::{Decoder, PlayState};
@@ -12,8 +13,12 @@ use alpagamp_core::settings::{VisMode, WindowState};
 use alpagamp_core::time::format_duration;
 use alpagamp_core::{Entry, Settings, Source};
 use alpagamp_skin::{Image, Skin};
+use alpagamp_audio::Media;
+use alpagamp_core::library::{LibraryItem, LibraryKind};
+use alpagamp_spotify::{ConnectCommand, LibraryRequest, Spotify, Status as SpotifyStatus};
 use alpagamp_ui::{
-    Action, EqView, EqWindow, GenKind, GenView, GenWindow, MainWindow, Mods, PlMenuItem, PlaylistView, PlaylistWindow,
+    Action, EqView, EqWindow, GenKind, GenView, GenWindow, LibTab, LibraryAction, LibraryView, LibraryWindow, MainWindow, Mods, PlMenuItem,
+    PlaylistView, PlaylistWindow,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
@@ -40,9 +45,10 @@ pub enum Kind {
     Eq = 1,
     Playlist = 2,
     Gen = 3,
+    Library = 4,
 }
 
-const KINDS: [Kind; 4] = [Kind::Main, Kind::Eq, Kind::Playlist, Kind::Gen];
+const KINDS: [Kind; 5] = [Kind::Main, Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library];
 
 /// Une fenêtre système et son état.
 struct Slot {
@@ -79,11 +85,17 @@ pub struct App {
     player: Player,
     default_skin: Skin,
     skin: Skin,
-    slots: [Slot; 4],
+    slots: [Slot; 5],
     main_ui: MainWindow,
     eq_ui: EqWindow,
     pl_ui: PlaylistWindow,
     gen_ui: GenWindow,
+    lib_ui: LibraryWindow,
+    spotify: Arc<Spotify>,
+    /// Requête de bibliothèque attendue pour la vue affichée.
+    lib_pending: Option<u64>,
+    /// Requête dont les morceaux iront à la fin de la playlist (lien de playlist ou d'album Spotify).
+    enqueue_pending: Option<u64>,
     mods: ModifiersState,
     moving: Option<Moving>,
     last_click: Option<(Instant, Kind, i32, i32)>,
@@ -140,7 +152,14 @@ impl App {
             Slot::new(s.eq_window.map(|w| w.open).unwrap_or(true), pos(s.eq_window)),
             Slot::new(s.playlist_window.map(|w| w.open).unwrap_or(true), pos(s.playlist_window)),
             Slot::new(false, None),
+            Slot::new(false, None),
         ];
+        let spotify = Arc::new(Spotify::new(paths.config_dir.join("spotify"), device_name(), false, Box::new(crate::dialogs::open_url)));
+        let sp = spotify.clone();
+        player.resolver = Some(Box::new(move |src: &Source| match src {
+            Source::Spotify(uri) => Some(Media::Custom(sp.opener(uri))),
+            _ => None,
+        }));
         App {
             paths,
             player,
@@ -151,6 +170,10 @@ impl App {
             eq_ui,
             pl_ui,
             gen_ui: GenWindow::new(GenKind::Jump),
+            lib_ui: LibraryWindow::default(),
+            spotify,
+            lib_pending: None,
+            enqueue_pending: None,
             mods: ModifiersState::empty(),
             moving: None,
             last_click: None,
@@ -196,6 +219,7 @@ impl App {
             Kind::Eq => self.eq_ui.size(),
             Kind::Playlist => self.pl_ui.size(),
             Kind::Gen => self.gen_ui.size(),
+            Kind::Library => self.lib_ui.size(),
         }
     }
 
@@ -209,6 +233,7 @@ impl App {
             Kind::Main => "Alpagamp".into(),
             Kind::Eq => format!("Alpagamp – {}", t("menu.equalizer")),
             Kind::Playlist => format!("Alpagamp – {}", t("menu.playlist_editor")),
+            Kind::Library => format!("Alpagamp – {}", t("menu.library")),
             Kind::Gen => match self.gen_ui.kind {
                 GenKind::Jump => format!("Alpagamp – {}", t("jump.title")),
                 GenKind::AddUrl => format!("Alpagamp – {}", t("url.title")),
@@ -293,9 +318,9 @@ impl App {
                 y += w.phys_size().1;
             }
         }
-        if k == Kind::Gen {
+        if matches!(k, Kind::Gen | Kind::Library) {
             let w = mw.phys_size().0;
-            return Some((mx + w + 20, my));
+            return Some((mx + w + if k == Kind::Gen { 20 } else { 0 }, my));
         }
         Some((mx, y))
     }
@@ -369,6 +394,8 @@ impl App {
             pl_open: self.slot(Kind::Playlist).open,
             has_auto_preset: name.is_some_and(|n| self.auto_presets.iter().any(|p| p.name == n)),
             bookmarks: self.bookmarks.iter().map(|e| e.display_title()).collect(),
+            library_open: self.slot(Kind::Library).open,
+            spotify_connected: self.spotify.is_connected(),
         }
     }
 
@@ -486,8 +513,8 @@ impl App {
                 Kind::Main => C::Exit,
                 Kind::Eq => C::ToggleEqWindow,
                 Kind::Playlist => C::TogglePlaylistWindow,
-                Kind::Gen => {
-                    self.set_open(Kind::Gen, false, event_loop);
+                Kind::Gen | Kind::Library => {
+                    self.set_open(from, false, event_loop);
                     return;
                 }
             },
@@ -581,10 +608,22 @@ impl App {
                 self.pl_ui.ensure_visible(i);
                 return;
             }
+            Action::Library(la) => {
+                self.library_action(la);
+                return;
+            }
             Action::SubmitUrl(url) => {
                 self.set_open(Kind::Gen, false, event_loop);
-                self.player.playlist.extend([Entry::new(Source::parse(&url, None))]);
-                self.player.playlist_changed();
+                match Source::parse(&url, None) {
+                    // Lien de playlist ou d'album Spotify : on ajoute ses morceaux.
+                    Source::Spotify(uri) if !uri.starts_with("spotify:track:") && !uri.starts_with("spotify:episode:") => {
+                        self.enqueue_pending = Some(self.spotify.request(LibraryRequest::Tracks(uri)));
+                    }
+                    src => {
+                        self.player.playlist.extend([Entry::new(src)]);
+                        self.player.playlist_changed();
+                    }
+                }
                 return;
             }
         };
@@ -596,7 +635,7 @@ impl App {
             Kind::Main => self.main_ui.shade = !self.main_ui.shade,
             Kind::Eq => self.eq_ui.shade = !self.eq_ui.shade,
             Kind::Playlist => self.pl_ui.shade = !self.pl_ui.shade,
-            Kind::Gen => return,
+            Kind::Gen | Kind::Library => return,
         }
         self.relayout(k);
     }
@@ -650,7 +689,29 @@ impl App {
 
     fn command(&mut self, cmd: Command, event_loop: &ActiveEventLoop) {
         use Command::*;
+        if self.connect_transport(&cmd) {
+            self.request_redraw();
+            return;
+        }
         match cmd {
+            ToggleLibrary => {
+                let open = !self.slot(Kind::Library).open;
+                self.set_open(Kind::Library, open, event_loop);
+                if open && self.lib_ui.items().is_empty() {
+                    self.load_library_tab();
+                }
+            }
+            SpotifyLogin => {
+                self.spotify.login();
+                if !self.slot(Kind::Library).open {
+                    self.set_open(Kind::Library, true, event_loop);
+                }
+                self.load_library_tab();
+            }
+            SpotifyLogout => {
+                self.spotify.logout();
+                self.load_library_tab();
+            }
             Previous => self.player.previous(),
             Play => self.player.play_pressed(),
             Pause => self.player.pause_pressed(),
@@ -725,7 +786,7 @@ impl App {
                 }
             }
             ToggleShade => {
-                let k = self.focused.filter(|&k| k != Kind::Gen).unwrap_or(Kind::Main);
+                let k = self.focused.filter(|&k| !matches!(k, Kind::Gen | Kind::Library)).unwrap_or(Kind::Main);
                 self.toggle_shade(k);
             }
             Vis(mode) => {
@@ -748,7 +809,7 @@ impl App {
                 event_loop.exit();
             }
             Minimize => {
-                for k in [Kind::Eq, Kind::Playlist, Kind::Gen] {
+                for k in [Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library] {
                     if let (true, Some(w)) = (self.slot(k).open, &self.slot(k).win) {
                         w.window.set_visible(false);
                     }
@@ -1009,6 +1070,168 @@ impl App {
         self.set_open(Kind::Gen, true, event_loop);
     }
 
+    // --- Bibliothèque et Spotify ----------------------------------------------------------------------
+
+    fn library_status(&self) -> String {
+        if self.lib_pending.is_some() {
+            return t("lib.loading").to_string();
+        }
+        if self.lib_ui.tab == LibTab::Radios {
+            return String::new();
+        }
+        match self.spotify.status() {
+            SpotifyStatus::LoggedOut => String::new(),
+            SpotifyStatus::Authorizing => t("lib.authorizing").to_string(),
+            SpotifyStatus::Connecting => t("lib.connecting").to_string(),
+            SpotifyStatus::Connected { user } => format!("Spotify : {user}"),
+            SpotifyStatus::Failed(e) => format!("Spotify : {e}"),
+        }
+    }
+
+    /// Charge l'onglet courant de la Bibliothèque.
+    fn load_library_tab(&mut self) {
+        let tab = self.lib_ui.tab;
+        self.lib_pending = None;
+        let req = match tab {
+            LibTab::Radios => Some(LibraryRequest::RadioTop),
+            LibTab::Search => None,
+            _ if !self.spotify.is_connected() => None,
+            LibTab::Playlists => Some(LibraryRequest::Playlists { liked_label: t("lib.liked_title").to_string() }),
+            LibTab::Liked => Some(LibraryRequest::Tracks("spotify:collection".into())),
+            LibTab::Albums => Some(LibraryRequest::Albums),
+        };
+        let mut items = Vec::new();
+        if tab != LibTab::Radios && !self.spotify.is_connected() {
+            if !matches!(self.spotify.status(), SpotifyStatus::Authorizing | SpotifyStatus::Connecting) {
+                items.push(LibraryItem::new(LibraryKind::Action, t("lib.login"), "", "action:login"));
+            }
+        }
+        self.lib_ui.set_items(items);
+        if let Some(r) = req {
+            self.lib_pending = Some(self.spotify.request(r));
+        }
+    }
+
+    fn library_action(&mut self, a: LibraryAction) {
+        match a {
+            LibraryAction::Tab(_) => self.load_library_tab(),
+            LibraryAction::Open(item) => {
+                self.lib_ui.push(&item.title, Vec::new());
+                self.lib_pending = Some(self.spotify.request(LibraryRequest::Tracks(item.uri)));
+            }
+            LibraryAction::Search { tab, query } => {
+                self.lib_ui.set_items(Vec::new());
+                let r = if tab == LibTab::Radios { LibraryRequest::RadioSearch(query) } else { LibraryRequest::Search(query) };
+                if tab == LibTab::Radios || self.spotify.is_connected() {
+                    self.lib_pending = Some(self.spotify.request(r));
+                } else {
+                    self.load_library_tab();
+                }
+            }
+            LibraryAction::Activate(item) => match item.uri.as_str() {
+                "action:login" => self.spotify.login(),
+                "action:logout" => self.spotify.logout(),
+                _ => {}
+            },
+            LibraryAction::Play { items, start } => {
+                let entries: Vec<Entry> = items.iter().map(library_entry).collect();
+                if entries.is_empty() {
+                    return;
+                }
+                self.player.stop();
+                self.player.playlist.clear();
+                self.player.playlist.extend(entries);
+                self.player.playlist_changed();
+                self.player.play_index(start.min(self.player.playlist.len() - 1));
+            }
+            LibraryAction::Enqueue(items) => {
+                self.player.playlist.extend(items.iter().map(library_entry));
+                self.player.playlist_changed();
+            }
+        }
+    }
+
+    /// Événements de Spotify.
+    fn spotify_events(&mut self) {
+        for ev in self.spotify.poll_events() {
+            match ev {
+                alpagamp_spotify::Event::Status(st) => {
+                    if matches!(st, SpotifyStatus::Connected { .. }) && self.slot(Kind::Library).open && self.lib_ui.tab != LibTab::Radios {
+                        self.load_library_tab();
+                    } else if matches!(st, SpotifyStatus::Failed(_) | SpotifyStatus::LoggedOut) && self.lib_ui.tab != LibTab::Radios {
+                        self.load_library_tab();
+                    }
+                    self.menus_dirty = true;
+                }
+                alpagamp_spotify::Event::ConnectStart => {
+                    self.player.play_external(Media::Custom(self.spotify.connect_opener()), "Spotify Connect");
+                }
+                alpagamp_spotify::Event::ConnectPause => {
+                    if self.player.is_external() {
+                        self.player.engine.pause();
+                    }
+                }
+                alpagamp_spotify::Event::ConnectResume => {
+                    if self.player.is_external() {
+                        self.player.engine.resume();
+                    }
+                }
+                alpagamp_spotify::Event::ConnectStop => {
+                    if self.player.is_external() {
+                        self.player.stop();
+                    }
+                }
+                alpagamp_spotify::Event::Library { request, result } if self.enqueue_pending == Some(request) => {
+                    self.enqueue_pending = None;
+                    match result {
+                        Ok(items) => {
+                            self.player.playlist.extend(items.iter().filter(|i| i.is_playable()).map(library_entry));
+                            self.player.playlist_changed();
+                        }
+                        Err(e) => self.player.last_error = Some((e, Instant::now())),
+                    }
+                }
+                alpagamp_spotify::Event::Library { request, result } => {
+                    if self.lib_pending == Some(request) {
+                        self.lib_pending = None;
+                        match result {
+                            Ok(items) if items.is_empty() => self.lib_ui.set_items(vec![LibraryItem::info(t("lib.empty"))]),
+                            Ok(items) => self.lib_ui.set_items(items),
+                            Err(e) => self.lib_ui.set_items(vec![LibraryItem::info(e)]),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Spotify Connect pilote la lecture : les boutons de transport s'adressent à lui.
+    fn connect_transport(&mut self, cmd: &Command) -> bool {
+        if !self.player.is_external() {
+            return false;
+        }
+        use Command::*;
+        match cmd {
+            Previous => self.spotify.connect_command(ConnectCommand::Previous),
+            Next => self.spotify.connect_command(ConnectCommand::Next),
+            Pause => {
+                if self.player.state() == PlayState::Paused {
+                    self.spotify.connect_command(ConnectCommand::Play);
+                    self.player.engine.resume();
+                } else {
+                    self.spotify.connect_command(ConnectCommand::Pause);
+                    self.player.engine.pause();
+                }
+            }
+            Play => {
+                self.spotify.connect_command(ConnectCommand::Play);
+                self.player.engine.resume();
+            }
+            _ => return false,
+        }
+        true
+    }
+
     fn show_file_info(&self, i: usize) {
         let Some(e) = self.player.playlist.entries().get(i) else { return };
         let probed;
@@ -1121,6 +1344,25 @@ impl App {
                     w.present(&s.fb, &self.gen_ui.text);
                 }
             }
+            Kind::Library => {
+                let status = self.library_status();
+                let prompt = if self.lib_ui.tab == LibTab::Radios { t("lib.radio_prompt") } else { t("lib.search_prompt") };
+                let view = LibraryView {
+                    active,
+                    title: t("menu.library"),
+                    tabs: [t("lib.tab_playlists"), t("lib.tab_liked"), t("lib.tab_albums"), t("lib.tab_search"), t("lib.tab_radios")],
+                    prompt,
+                    back: t("lib.back"),
+                    play: t("pl.play_item"),
+                    add: t("lib.add"),
+                    status: &status,
+                };
+                let s = &mut self.slots[4];
+                self.lib_ui.render(&mut s.fb, &self.skin, &view);
+                if let Some(w) = s.win.as_mut() {
+                    w.present(&s.fb, &self.lib_ui.text);
+                }
+            }
         }
     }
 
@@ -1187,6 +1429,13 @@ impl App {
                 }
                 a
             }
+            Kind::Library => {
+                let mut a = if double { self.lib_ui.double_click(x, y) } else { Vec::new() };
+                if a.is_empty() {
+                    a = self.lib_ui.mouse_down(x, y);
+                }
+                a
+            }
         };
         for a in actions {
             self.action(k, a, event_loop);
@@ -1213,6 +1462,7 @@ impl App {
             }
             Kind::Playlist => self.pl_ui.mouse_up(x, y, mods),
             Kind::Gen => self.gen_ui.mouse_up(x, y),
+            Kind::Library => self.lib_ui.mouse_up(x, y),
         };
         for a in actions {
             self.action(k, a, event_loop);
@@ -1238,6 +1488,10 @@ impl App {
                 self.gen_ui.mouse_move(x, y);
                 Vec::new()
             }
+            Kind::Library => {
+                self.lib_ui.mouse_move(x, y);
+                Vec::new()
+            }
         };
         for a in actions {
             self.action(k, a, event_loop);
@@ -1245,7 +1499,7 @@ impl App {
     }
 
     fn is_dragging(&self) -> bool {
-        self.moving.is_some() || self.main_ui.is_dragging() || self.eq_ui.is_dragging() || self.pl_ui.is_dragging() || self.gen_ui.is_dragging()
+        self.moving.is_some() || self.main_ui.is_dragging() || self.eq_ui.is_dragging() || self.pl_ui.is_dragging() || self.gen_ui.is_dragging() || self.lib_ui.is_dragging()
     }
 
     /// Ouvre les fenêtres au démarrage.
@@ -1290,6 +1544,26 @@ impl App {
     }
 }
 
+/// Nom de l'appareil dans Spotify Connect.
+fn device_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Alpagamp (Mac)"
+    } else if cfg!(target_os = "windows") {
+        "Alpagamp (PC)"
+    } else {
+        "Alpagamp (Linux)"
+    }
+}
+
+/// Entrée de playlist pour un élément de la Bibliothèque.
+fn library_entry(it: &LibraryItem) -> Entry {
+    let src = Source::parse(&it.uri, None);
+    let title = if it.kind == LibraryKind::Radio { it.title.clone() } else { it.playlist_title() };
+    let mut e = Entry::with_meta(src, Some(title), it.duration_ms);
+    e.meta_loaded = true;
+    e
+}
+
 fn apply_language(s: &Settings) {
     let lang = s
         .language
@@ -1318,7 +1592,7 @@ impl ApplicationHandler for App {
                     self.focused = Some(k);
                     if k == Kind::Main && self.hidden_by_minimize {
                         self.hidden_by_minimize = false;
-                        for o in [Kind::Eq, Kind::Playlist, Kind::Gen] {
+                        for o in [Kind::Eq, Kind::Playlist, Kind::Gen, Kind::Library] {
                             if let (true, Some(w)) = (self.slot(o).open, &self.slot(o).win) {
                                 w.window.set_visible(true);
                             }
@@ -1392,6 +1666,7 @@ impl ApplicationHandler for App {
                         }
                         Kind::Playlist => self.pl_ui.wheel(lines),
                         Kind::Gen => self.gen_ui.wheel(lines),
+                        Kind::Library => self.lib_ui.wheel(lines),
                         Kind::Eq => {}
                     }
                     self.request_redraw();
@@ -1399,6 +1674,15 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state != ElementState::Pressed {
+                    return;
+                }
+                if k == Kind::Library {
+                    if let Some(gk) = keys::gen_key(&event, self.mods) {
+                        for a in self.lib_ui.key(gk) {
+                            self.action(Kind::Library, a, event_loop);
+                        }
+                        self.request_redraw();
+                    }
                     return;
                 }
                 if k == Kind::Gen {
@@ -1437,6 +1721,7 @@ impl ApplicationHandler for App {
                 self.command(c, event_loop);
             }
         }
+        self.spotify_events();
         self.player.tick();
         if self.player.take_track_changed().is_some() {
             self.apply_auto_preset();

@@ -124,6 +124,7 @@ pub fn map(ev: &KeyEvent, m: ModifiersState, focus: Focus) -> Option<Command> {
                 ("s", false, false, true) => Some(LoadSkin),
                 ("g", false, false, true) => Some(ToggleEqWindow),
                 ("e", false, false, true) => Some(TogglePlaylistWindow),
+                ("l", false, false, true) => Some(ToggleLibrary),
                 ("b", true, false, true) => Some(AddBookmark),
                 ("d", true, false, false) => Some(ToggleDoubleSize),
                 ("t", true, false, false) => Some(ToggleTimeMode),
