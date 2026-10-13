@@ -6,6 +6,13 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+## [0.4.0] - 2026-10-13
+
+> Mise en service : Windows (`Alpagamp-0.4.0-windows-x64.zip`) — remplacer l'ancien dossier. Android
+> (`Alpagamp-0.4.0.apk`) — installer par-dessus la 0.3. Pour Spotify : Bibliothèque (Alt+L, ou menu ›
+> Bibliothèque sur téléphone) › « Se connecter à Spotify… », autoriser dans le navigateur, revenir dans Alpagamp.
+> Spotify Premium nécessaire.
+
 ### Ajouté
 - Spotify : connexion en un clic (navigateur, sans configuration), gardée d'une session à l'autre ; lecture des
   morceaux Spotify dans la chaîne audio d'Alpagamp (égaliseur, visualiseur, fondu enchaîné), 320 kbit/s ;

@@ -180,7 +180,7 @@ impl PcmSource for BufferSource {
         self.shared.flush(None);
         (self.seek)(ms);
         // Laisse au lecteur le temps de reprendre à la nouvelle position.
-        let _ = self.shared.wait_ready(Duration::from_secs(10));
+        let _ = self.shared.wait_ready(Duration::from_secs(5));
         Ok(ms)
     }
 

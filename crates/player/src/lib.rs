@@ -446,12 +446,16 @@ impl Player {
                     let is_current = self.playing.is_some_and(|(t, _)| t == token);
                     let is_planned = self.planned.is_some_and(|(t, _)| t == token);
                     if is_current || is_planned {
-                        self.error(message);
+                        self.error(message.clone());
                     }
                     if is_planned {
                         self.planned = None;
                     }
-                    if is_current {
+                    if is_current && (message.contains("pas connecté") || message.contains("Premium")) {
+                        // Spotify indisponible : inutile d'essayer les morceaux suivants un par un.
+                        self.playing = None;
+                        self.external = None;
+                    } else if is_current {
                         // Morceau illisible : on passe au suivant (comme Winamp), sans boucler à l'infini.
                         self.playing = None;
                         let s = &self.settings;

@@ -416,8 +416,9 @@ impl Spotify {
                     }
                 }),
                 Box::new(move || {
-                    // Alpagamp passe à autre chose : Spotify Connect se met en pause.
-                    if i_drop.connect_active.load(Ordering::Acquire) {
+                    // Alpagamp passe à autre chose : Spotify Connect se met en pause ; une reprise depuis l'appli
+                    // Spotify relancera la lecture ici (ConnectStart).
+                    if i_drop.connect_active.swap(false, Ordering::AcqRel) {
                         if let Some(s) = &*i_drop.spirc.lock() {
                             let _ = s.pause();
                         }

@@ -11,8 +11,8 @@ visualizations, and soon your Spotify music. English summary below.*
 
 ## État
 
-Préversion **0.3** : fenêtre principale, égaliseur, playlist, fenêtres aimantées, skins classiques, fichiers
-locaux et radios, fondu enchaîné, ReplayGain, première version Android. Feuille de route vers la 1.0 :
+Préversion **0.4** : fenêtre principale, égaliseur, playlist, fenêtres aimantées, skins classiques, fichiers
+locaux et radios, fondu enchaîné, ReplayGain, Android, Spotify (Bibliothèque, Spotify Connect). Feuille de route vers la 1.0 :
 
 | Version | Contenu |
 |---|---|
@@ -33,8 +33,8 @@ Les décisions sont expliquées dans [`docs/adr`](docs/adr/README.md), le vocabu
 - **Windows** : télécharger `Alpagamp-X.Y.Z-windows-x64.zip` dans les releases, décompresser, lancer
   `alpagamp.exe`. Au premier lancement, Windows avertit (application non signée) : « Informations
   complémentaires » puis « Exécuter quand même ».
-- **macOS** : `Alpagamp-X.Y.Z.dmg` (à venir avec la compilation automatique). Application non signée : clic droit
-  sur l'application, « Ouvrir », puis « Ouvrir ».
+- **macOS** : `Alpagamp-X.Y.Z.dmg` (en attendant la compilation automatique, `scripts/construire-mac.sh` le
+  construit sur un Mac). Application non signée : clic droit sur l'application, « Ouvrir », puis « Ouvrir ».
 - **Android** (Pixel 8 et Android 8 ou plus récent, processeur 64 bits) : ouvrir `Alpagamp-X.Y.Z.apk` sur le
   téléphone, autoriser l'installation depuis cette source, installer. Au premier lancement, autoriser l'accès à la
   musique. Appui long n'importe où : le menu ; double-tap sur un morceau : le jouer.
