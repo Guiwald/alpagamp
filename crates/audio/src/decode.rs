@@ -35,6 +35,8 @@ pub struct TrackInfo {
     pub seekable: bool,
     /// Nom du codec (« MP3 », « FLAC »…).
     pub codec: String,
+    /// Nom de la radio (en-tête `icy-name`), pour un flux.
+    pub stream_name: Option<String>,
 }
 
 impl TrackInfo {

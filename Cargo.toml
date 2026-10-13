@@ -15,7 +15,7 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/Guiwald/alpagamp"
 authors = ["Guiwald"]
-rust-version = "1.88"
+rust-version = "1.89"
 
 [workspace.dependencies]
 alpagamp-skin = { path = "crates/skin" }

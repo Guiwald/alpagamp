@@ -9,6 +9,7 @@ pub mod decode;
 pub mod dsp;
 pub mod output;
 pub mod resample;
+pub mod stream;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -51,6 +52,10 @@ pub trait PcmSource: Send {
     fn take_info_update(&mut self) -> Option<TrackInfo> {
         None
     }
+    /// Assez de données pour décoder sans attendre (un flux réseau peut manquer de données).
+    fn ready(&self) -> bool {
+        true
+    }
 }
 
 impl PcmSource for Decoder {
@@ -72,6 +77,8 @@ pub type Opener = Arc<dyn Fn() -> Result<Box<dyn PcmSource>, AudioError> + Send 
 #[derive(Clone)]
 pub enum Media {
     File(PathBuf),
+    /// Radio ou fichier distant (http, https, icy).
+    Url(String),
     Custom(Opener),
 }
 
@@ -79,6 +86,7 @@ impl std::fmt::Debug for Media {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Media::File(p) => write!(f, "File({})", p.display()),
+            Media::Url(u) => write!(f, "Url({u})"),
             Media::Custom(_) => write!(f, "Custom"),
         }
     }
@@ -88,6 +96,7 @@ impl Media {
     fn open(&self) -> Result<Box<dyn PcmSource>, AudioError> {
         match self {
             Media::File(p) => Ok(Box::new(Decoder::open_file(p)?)),
+            Media::Url(u) => Ok(Box::new(stream::open_stream(u)?)),
             Media::Custom(o) => o(),
         }
     }
@@ -174,6 +183,7 @@ enum Cmd {
     Seek(u64),
     Eq(EqSettings),
     ReplayGain(ReplayGain),
+    Crossfade(u32),
     Shutdown,
 }
 
@@ -249,6 +259,11 @@ impl Engine {
 
     pub fn set_replay_gain(&self, rg: ReplayGain) {
         let _ = self.cmds.send(Cmd::ReplayGain(rg));
+    }
+
+    /// Durée du fondu enchaîné entre deux morceaux (0 = enchaînement sans blanc).
+    pub fn set_crossfade(&self, ms: u32) {
+        let _ = self.cmds.send(Cmd::Crossfade(ms));
     }
 
     /// Volume linéaire 0..=1.
@@ -331,6 +346,20 @@ struct Current {
     src: Box<dyn PcmSource>,
     resampler: StereoResampler,
     finished: bool,
+    /// Gain ReplayGain linéaire de ce morceau.
+    gain: f32,
+    /// Position de départ (ms) et trames de sortie produites depuis.
+    base_ms: u64,
+    out_frames: u64,
+}
+
+/// Fondu enchaîné en cours : le morceau sortant et sa progression.
+struct Fade {
+    old: Current,
+    total: u64,
+    done: u64,
+    /// Audio du morceau sortant déjà décodé mais pas encore mélangé.
+    pending: Vec<f32>,
 }
 
 struct Opening {
@@ -359,6 +388,8 @@ struct Worker {
     next_request: Option<(Token, Media)>,
     dsp: Dsp,
     rg: ReplayGain,
+    crossfade_ms: u32,
+    fade: Option<Fade>,
     decoded: Vec<f32>,
     resampled: Vec<f32>,
     /// Média de chaque morceau encore dans la file (pour un déplacement dans un morceau déjà quitté).
@@ -390,6 +421,8 @@ impl Worker {
             next_request: None,
             dsp: Dsp::new(rate),
             rg: ReplayGain::default(),
+            crossfade_ms: 0,
+            fade: None,
             decoded: Vec::with_capacity(16_384),
             resampled: Vec::with_capacity(16_384),
             media_of: Vec::new(),
@@ -473,17 +506,18 @@ impl Worker {
             Cmd::Eq(eq) => self.dsp.set_eq(eq),
             Cmd::ReplayGain(rg) => {
                 self.rg = rg;
-                if let Some(c) = &self.current {
-                    let db = self.rg.gain_db(c.src.info());
-                    self.dsp.set_replay_gain_db(db);
+                if let Some(c) = self.current.as_mut() {
+                    c.gain = 10f32.powf(rg.gain_db(c.src.info()) / 20.0);
                 }
             }
+            Cmd::Crossfade(ms) => self.crossfade_ms = ms,
             Cmd::Shutdown => return false,
         }
         true
     }
 
     fn hard_stop(&mut self) {
+        self.fade = None;
         self.shared.queue.lock().flush();
         self.shared.vis.lock().clear();
         self.current = None;
@@ -534,7 +568,7 @@ impl Worker {
         let info = src.info().clone();
         let resampler = StereoResampler::new(info.sample_rate, self.out_rate());
         self.dsp.set_rate(self.out_rate());
-        self.dsp.set_replay_gain_db(self.rg.gain_db(&info));
+        let gain = 10f32.powf(self.rg.gain_db(&info) / 20.0);
         let start = self.shared.queue.lock().pushed;
         {
             let mut tl = self.timeline.lock();
@@ -543,7 +577,7 @@ impl Worker {
         }
         self.media_of.retain(|(t, _)| *t != token);
         self.media_of.push((token, media.clone()));
-        self.current = Some(Current { token, media, src, resampler, finished: false });
+        self.current = Some(Current { token, media, src, resampler, finished: false, gain, base_ms, out_frames: 0 });
     }
 
     fn poll_next(&mut self) {
@@ -565,8 +599,66 @@ impl Worker {
         }
     }
 
+    /// Temps restant à décoder du morceau courant (si sa durée est connue).
+    fn remaining_ms(c: &Current, rate: u64) -> Option<u64> {
+        let d = c.src.info().duration_ms?;
+        let pos = c.base_ms + c.out_frames * 1000 / rate.max(1);
+        Some(d.saturating_sub(pos))
+    }
+
+    /// Commence le fondu enchaîné : le morceau courant passe en fondu sortant, le suivant démarre.
+    fn start_fade(&mut self) {
+        let Some(old) = self.current.take() else { return };
+        let NextState::Ready(t, m, src) = std::mem::replace(&mut self.next, NextState::None) else {
+            self.current = Some(old);
+            return;
+        };
+        self.next_request = None;
+        let rate = self.out_rate() as u64;
+        let rem = Self::remaining_ms(&old, rate).unwrap_or(0).min(self.crossfade_ms as u64);
+        self.fade = Some(Fade { total: (rem * rate / 1000).max(1), done: 0, pending: Vec::new(), old });
+        self.begin(t, m, src, 0);
+    }
+
+    /// Mélange le fondu sortant dans `self.resampled` (déjà au gain du morceau entrant).
+    fn mix_fade(&mut self) {
+        let Some(f) = self.fade.as_mut() else { return };
+        let need = self.resampled.len();
+        let mut dec = Vec::new();
+        let mut tmp = Vec::new();
+        while f.pending.len() < need && !f.old.finished {
+            dec.clear();
+            tmp.clear();
+            let n = f.old.src.read(&mut dec).unwrap_or(0);
+            if n == 0 {
+                f.old.resampler.flush(&mut tmp);
+                f.old.finished = true;
+            } else {
+                f.old.resampler.push(&dec, &mut tmp);
+            }
+            let g = f.old.gain;
+            f.pending.extend(tmp.iter().map(|s| s * g));
+        }
+        let frames = need / 2;
+        for i in 0..frames {
+            let t = ((f.done + i as u64) as f32 / f.total as f32).min(1.0);
+            let (fin, fout) = ((t * std::f32::consts::FRAC_PI_2).sin(), (t * std::f32::consts::FRAC_PI_2).cos());
+            let ol = f.pending.get(2 * i).copied().unwrap_or(0.0);
+            let or = f.pending.get(2 * i + 1).copied().unwrap_or(0.0);
+            self.resampled[2 * i] = self.resampled[2 * i] * fin + ol * fout;
+            self.resampled[2 * i + 1] = self.resampled[2 * i + 1] * fin + or * fout;
+        }
+        let used = need.min(f.pending.len());
+        f.pending.drain(..used);
+        f.done += frames as u64;
+        if f.done >= f.total {
+            self.fade = None;
+        }
+    }
+
     fn fill(&mut self) {
         let target = (self.out_rate() as usize) / 5; // 200 ms d'avance
+        let rate = self.out_rate() as u64;
         let mut guard = 0;
         while guard < 64 {
             guard += 1;
@@ -596,6 +688,26 @@ impl Worker {
                     }
                 }
             }
+            // Fondu enchaîné : on démarre le suivant quand il reste « durée du fondu » à jouer.
+            if self.crossfade_ms > 0 && self.fade.is_none() && matches!(self.next, NextState::Ready(..)) && cur.src.info().seekable {
+                if Self::remaining_ms(cur, rate).is_some_and(|r| r <= self.crossfade_ms as u64) {
+                    self.start_fade();
+                    continue;
+                }
+            }
+            let Some(cur) = self.current.as_mut() else { return };
+            if !cur.src.ready() {
+                // Flux en manque de données : on attend sans bloquer le fil (les commandes restent servies).
+                let starving = self.shared.queue.lock().queued_frames() < target / 4;
+                self.timeline.lock().buffering = starving;
+                return;
+            }
+            {
+                let mut tl = self.timeline.lock();
+                if tl.buffering && self.opening.is_none() {
+                    tl.buffering = false;
+                }
+            }
             self.decoded.clear();
             let n = match cur.src.read(&mut self.decoded) {
                 Ok(n) => n,
@@ -621,6 +733,14 @@ impl Worker {
                 cur.finished = true;
             } else {
                 cur.resampler.push(&self.decoded, &mut self.resampled);
+            }
+            cur.out_frames += (self.resampled.len() / 2) as u64;
+            let g = cur.gain;
+            if g != 1.0 {
+                self.resampled.iter_mut().for_each(|s| *s *= g);
+            }
+            if self.fade.is_some() {
+                self.mix_fade();
             }
             if !self.resampled.is_empty() {
                 self.dsp.process(&mut self.resampled);
@@ -682,6 +802,7 @@ impl Worker {
             tl.segments.iter().rev().find(|s| s.start <= played).or_else(|| tl.segments.front()).map(|s| s.token)
         };
         let Some(heard) = heard else { return };
+        self.fade = None;
         let decoding_same = self.current.as_ref().is_some_and(|c| c.token == heard);
         self.shared.queue.lock().flush();
         self.dsp.reset_state();
@@ -691,6 +812,8 @@ impl Worker {
                 Ok(actual) => {
                     cur.resampler.reset();
                     cur.finished = false;
+                    cur.base_ms = actual;
+                    cur.out_frames = 0;
                     let start = self.shared.queue.lock().pushed;
                     let mut tl = self.timeline.lock();
                     tl.eos_at = None;
@@ -742,6 +865,29 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn crossfades_into_the_next_track() {
+        let dir = std::env::temp_dir().join(format!("alpagamp-cf-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("a.wav");
+        let b = dir.join("b.wav");
+        sine_wav(&a, 44_100, 1.2, 440.0);
+        sine_wav(&b, 44_100, 1.2, 660.0);
+        let engine = Engine::new();
+        engine.set_crossfade(600);
+        let t0 = Instant::now();
+        engine.play(1, Media::File(a.clone()), 0, false);
+        assert!(wait_for(&engine, 3000, |e| matches!(e, Event::Started { token: 1, .. })).is_some());
+        engine.set_next(Some((2, Media::File(b.clone()))));
+        assert!(wait_for(&engine, 3000, |e| matches!(e, Event::Advanced { previous: 1, token: 2, .. })).is_some());
+        let adv = t0.elapsed().as_millis();
+        assert!(adv < 1000, "le suivant devait commencer avant la fin du premier : {adv} ms");
+        assert!(wait_for(&engine, 4000, |e| matches!(e, Event::Ended { token: 2 })).is_some());
+        let total = t0.elapsed().as_millis();
+        assert!(total < 2200, "durée totale {total} ms (sans fondu : 2400)");
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
