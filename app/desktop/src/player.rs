@@ -1,9 +1,12 @@
 //! Le contrôleur de lecture : playlist + moteur audio + réglages.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
-use alpagamp_audio::{Engine, Event, Media, PlayState, Token, TrackInfo};
+use alpagamp_audio::{Decoder, Engine, Event, Media, PlayState, Token, TrackInfo};
+use alpagamp_core::eq::EqSettings;
 use alpagamp_core::formats::{is_audio_path, is_playlist_path, read_playlist_bytes, write_m3u};
 use alpagamp_core::time::format_duration;
 use alpagamp_core::{Entry, Playlist, Settings, Source};
@@ -14,10 +17,13 @@ pub struct Player {
     pub playlist: Playlist,
     pub settings: Settings,
     token_seq: Token,
-    /// Morceau entendu : (jeton, index dans la playlist).
-    playing: Option<(Token, usize)>,
-    /// Morceau suivant préparé pour l'enchaînement : (jeton, index).
-    planned: Option<(Token, usize)>,
+    /// Morceau entendu : (jeton, identifiant de l'entrée).
+    playing: Option<(Token, u64)>,
+    /// Morceau suivant préparé pour l'enchaînement : (jeton, identifiant de l'entrée).
+    planned: Option<(Token, u64)>,
+    /// Entrée dont la lecture vient de commencer (pour les préréglages EQ automatiques).
+    track_changed: Option<u64>,
+    scanner: Scanner,
     pub info: Option<TrackInfo>,
     /// Arrêt en fondu : (début, volume de départ).
     fade: Option<(Instant, u8)>,
@@ -36,6 +42,8 @@ impl Player {
             token_seq: 0,
             playing: None,
             planned: None,
+            track_changed: None,
+            scanner: Scanner::new(),
             info: None,
             fade: None,
             stop_after_current: false,
@@ -58,6 +66,27 @@ impl Player {
 
     pub fn state(&self) -> PlayState {
         self.engine.status().state
+    }
+
+    pub fn set_eq(&mut self, eq: EqSettings) {
+        self.settings.eq = eq;
+        self.engine.set_eq(eq);
+    }
+
+    /// Entrée dont la lecture vient de commencer, une seule fois.
+    pub fn take_track_changed(&mut self) -> Option<u64> {
+        self.track_changed.take()
+    }
+
+    /// À appeler après toute modification de la playlist (ajout, tri, suppression…).
+    pub fn playlist_changed(&mut self) {
+        self.scanner.pending = true;
+        self.replan();
+    }
+
+    /// Index dans la playlist du morceau entendu (s'il y est toujours).
+    pub fn playing_index(&self) -> Option<usize> {
+        self.playing.and_then(|(_, id)| self.playlist.index_of(id))
     }
 
     // --- Playlist ---------------------------------------------------------------------------------
@@ -93,9 +122,10 @@ impl Player {
             self.playlist.clear();
             self.playlist.extend(entries);
             self.play_index(0);
+            self.playlist_changed();
         } else {
             self.playlist.extend(entries);
-            self.replan();
+            self.playlist_changed();
         }
     }
 
@@ -107,6 +137,7 @@ impl Player {
                 self.playlist.set_current(Some(i));
             }
             self.playlist.dirty = false;
+            self.playlist_changed();
         }
     }
 
@@ -137,7 +168,7 @@ impl Player {
         match self.media_for(i) {
             Some(m) => {
                 let t = self.next_token();
-                self.playing = Some((t, i));
+                self.playing = Some((t, self.playlist.entries()[i].id));
                 self.planned = None;
                 self.engine.play(t, m, 0, false);
             }
@@ -272,13 +303,13 @@ impl Player {
         }
         let s = &self.settings;
         let next = self.playlist.peek_auto_advance(s.shuffle, s.repeat, s.manual_advance);
-        match next.and_then(|i| self.media_for(i).map(|m| (i, m))) {
-            Some((i, m)) => {
-                if self.planned.is_some_and(|(_, pi)| pi == i) {
+        match next.and_then(|i| self.media_for(i).map(|m| (self.playlist.entries()[i].id, m))) {
+            Some((id, m)) => {
+                if self.planned.is_some_and(|(_, pid)| pid == id) {
                     return;
                 }
                 let t = self.next_token();
-                self.planned = Some((t, i));
+                self.planned = Some((t, id));
                 self.engine.set_next(Some((t, m)));
             }
             None => {
@@ -293,6 +324,7 @@ impl Player {
 
     /// À appeler régulièrement : traite les événements du moteur et le fondu.
     pub fn tick(&mut self) {
+        self.scan_metadata();
         if let Some((start, from)) = self.fade {
             let k = start.elapsed().as_secs_f32() / 2.0;
             if k >= 1.0 {
@@ -305,9 +337,10 @@ impl Player {
         for ev in self.engine.poll_events() {
             match ev {
                 Event::Started { token, info } => {
-                    if self.playing.is_some_and(|(t, _)| t == token) {
+                    if let Some((_, id)) = self.playing.filter(|(t, _)| *t == token) {
                         self.on_track_info(token, &info);
                         self.info = Some(info);
+                        self.track_changed = Some(id);
                         self.replan();
                     }
                 }
@@ -318,11 +351,14 @@ impl Player {
                     }
                 }
                 Event::Advanced { token, info, .. } => {
-                    if let Some((pt, i)) = self.planned.take().filter(|(t, _)| *t == token) {
-                        self.playing = Some((pt, i));
-                        self.playlist.set_current(Some(i));
+                    if let Some((pt, id)) = self.planned.take().filter(|(t, _)| *t == token) {
+                        self.playing = Some((pt, id));
+                        if let Some(i) = self.playlist.index_of(id) {
+                            self.playlist.set_current(Some(i));
+                        }
                         self.on_track_info(token, &info);
                         self.info = Some(info);
+                        self.track_changed = Some(id);
                         if self.stop_after_current {
                             self.stop_after_current = false;
                             self.stop();
@@ -369,7 +405,8 @@ impl Player {
 
     /// Met à jour l'entrée de playlist avec le titre et la durée lus dans le fichier.
     fn on_track_info(&mut self, token: Token, info: &TrackInfo) {
-        let Some((_, i)) = self.playing.filter(|(t, _)| *t == token) else { return };
+        let Some((_, id)) = self.playing.filter(|(t, _)| *t == token) else { return };
+        let Some(i) = self.playlist.index_of(id) else { return };
         if let Some(e) = self.playlist.entry_mut(i) {
             if let Some(t) = info.display_title() {
                 e.title = Some(t);
@@ -378,6 +415,32 @@ impl Player {
                 e.duration_ms = info.duration_ms;
             }
             e.meta_loaded = true;
+        }
+    }
+
+    /// Envoie les entrées sans métadonnées au lecteur d'étiquettes et applique ses réponses.
+    fn scan_metadata(&mut self) {
+        if std::mem::take(&mut self.scanner.pending) {
+            for e in self.playlist.entries() {
+                if let Source::File(p) = &e.source {
+                    if !e.meta_loaded && self.scanner.queued.insert(e.id) {
+                        let _ = self.scanner.tx.send((e.id, p.clone()));
+                    }
+                }
+            }
+        }
+        while let Ok((id, title, duration)) = self.scanner.rx.try_recv() {
+            if let Some(i) = self.playlist.index_of(id) {
+                if let Some(e) = self.playlist.entry_mut(i) {
+                    if !e.meta_loaded {
+                        if title.is_some() {
+                            e.title = title;
+                        }
+                        e.duration_ms = duration.or(e.duration_ms);
+                        e.meta_loaded = true;
+                    }
+                }
+            }
         }
     }
 
@@ -425,6 +488,33 @@ impl Player {
             vis: self.settings.vis.clone(),
             clock_ms,
         }
+    }
+}
+
+/// Lit titres et durées en arrière-plan, sans bloquer l'interface.
+struct Scanner {
+    tx: Sender<(u64, PathBuf)>,
+    rx: Receiver<(u64, Option<String>, Option<u64>)>,
+    queued: HashSet<u64>,
+    pending: bool,
+}
+
+impl Scanner {
+    fn new() -> Scanner {
+        let (tx, jobs) = channel::<(u64, PathBuf)>();
+        let (done, rx) = channel();
+        let _ = std::thread::Builder::new().name("alpagamp-tags".into()).spawn(move || {
+            while let Ok((id, path)) = jobs.recv() {
+                let (title, duration) = match Decoder::open_file(&path) {
+                    Ok(d) => (d.info.display_title(), d.info.duration_ms),
+                    Err(_) => (None, None),
+                };
+                if done.send((id, title, duration)).is_err() {
+                    break;
+                }
+            }
+        });
+        Scanner { tx, rx, queued: HashSet::new(), pending: false }
     }
 }
 

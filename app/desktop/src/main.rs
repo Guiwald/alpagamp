@@ -6,6 +6,7 @@ mod app;
 mod command;
 mod dialogs;
 mod keys;
+mod layout;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod menu;
 mod paths;

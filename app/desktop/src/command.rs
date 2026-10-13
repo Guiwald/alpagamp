@@ -3,9 +3,11 @@
 use std::path::PathBuf;
 
 use alpagamp_core::i18n::Lang;
+use alpagamp_core::playlist::SortKey;
 use alpagamp_core::settings::VisMode;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub enum Command {
     Previous,
     Play,
@@ -24,7 +26,6 @@ pub enum Command {
     VolumeDown,
     OpenFiles,
     OpenFolder,
-    AddFiles,
     LoadSkin,
     DefaultSkin,
     SkinFile(PathBuf),
@@ -34,6 +35,7 @@ pub enum Command {
     ToggleTimeMode,
     ToggleDoubleSize,
     ToggleAlwaysOnTop,
+    /// Bandeau de la fenêtre qui a le focus (ou de la principale).
     ToggleShade,
     Vis(VisMode),
     FileInfo,
@@ -41,4 +43,55 @@ pub enum Command {
     Exit,
     Minimize,
     Language(Option<Lang>),
+    // --- Fenêtres ---
+    ToggleEqWindow,
+    TogglePlaylistWindow,
+    JumpToFile,
+    // --- Égaliseur ---
+    ToggleEq,
+    ToggleEqAuto,
+    EqPreset(usize),
+    EqLoadFile,
+    EqSaveFile,
+    EqSaveAuto,
+    EqDeleteAuto,
+    EqReset,
+    // --- Playlist ---
+    PlAddFiles,
+    PlAddFolder,
+    PlAddUrl,
+    PlRemoveSelected,
+    PlCrop,
+    PlRemoveAll,
+    PlRemoveMissing,
+    PlRemoveDuplicates,
+    PlSelectAll,
+    PlSelectNone,
+    PlInvertSelection,
+    PlSort(SortKey),
+    PlReverse,
+    PlRandomize,
+    PlNew,
+    PlSave,
+    PlLoad,
+    PlFileInfo,
+    /// Jouer la ligne qui a le focus (ou la première sélectionnée).
+    PlPlaySelected,
+    /// Focus clavier : déplacer de n lignes (avec Maj, étendre la sélection).
+    PlCursor(isize, bool),
+    /// Déplacer la sélection (Alt+↑/↓).
+    PlMoveSelection(isize),
+}
+
+/// Les menus surgissants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Popup {
+    /// Le menu principal (clic droit, bouton d'options).
+    Main,
+    EqPresets,
+    PlRemoveMisc,
+    PlSort,
+    PlMisc,
+    /// Clic droit dans la liste.
+    PlContext,
 }

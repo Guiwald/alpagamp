@@ -18,9 +18,10 @@ fn main() {
         "dist-windows" => dist_windows(args.get(1).map(PathBuf::from)),
         "bundle-mac" => bundle_mac(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
         "render-main" => render_main(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
+        "render-windows" => render_windows(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
         _ => {
             eprintln!(
-                "Commandes :\n  skin-sheets <dossier> [skin.wsz]   écrit chaque planche en PNG (×3)\n  export-default-skin <fichier.wsz>  exporte le skin par défaut"
+                "Commandes :\n  skin-sheets <dossier> [skin.wsz]       écrit chaque planche en PNG (×3)\n  export-default-skin <fichier.wsz>      exporte le skin par défaut\n  render-main <sortie.png> [skin.wsz]    aperçu de la fenêtre principale\n  render-windows <sortie.png> [skin.wsz] aperçu des trois fenêtres et de la fenêtre générique\n  icons <dossier>                        icônes PNG, .ico, .icns\n  dist-windows [alpagamp.exe]            paquet zip Windows dans dist/\n  bundle-mac <binaire> [dossier]         Alpagamp.app (+ .dmg sur macOS)\n  changelog-page                         page HTML des versions dans dist/\n  bump patch|minor|major                 nouvelle version"
             );
             Ok(())
         }
@@ -94,6 +95,106 @@ fn render_main(out: Option<PathBuf>, wsz: Option<PathBuf>) -> Res {
     let shade_path = out.with_file_name(format!("{}-shade.png", out.file_stem().unwrap().to_string_lossy()));
     write_png(&shade_path, &fb, 3)?;
     println!("{} et {}", out.display(), shade_path.display());
+    Ok(())
+}
+
+/// Rend les trois fenêtres empilées (principale, égaliseur, playlist) en PNG ×3, texte vectoriel compris.
+fn render_windows(out: Option<PathBuf>, wsz: Option<PathBuf>) -> Res {
+    use alpagamp_core::{Entry, Source, TotalTime};
+    use alpagamp_ui::{EqView, EqWindow, MainView, MainWindow, PlaylistView, PlaylistWindow, Transport};
+    let out = out.ok_or("fichier de sortie manquant")?;
+    let def = Skin::default_skin();
+    let skin = match wsz {
+        Some(p) => Skin::load_wsz("x", &std::fs::read(&p)?, &def)?,
+        None => def,
+    };
+    const Z: u32 = 3;
+    let mut main = MainWindow::new();
+    let mv = MainView {
+        transport: Transport::Playing,
+        position_ms: 83_000,
+        duration_ms: Some(296_000),
+        seekable: true,
+        title: "3. Alpagamp - Chanson de test (4:56)".into(),
+        kbps: Some(320),
+        khz: Some(44),
+        stereo: Some(true),
+        volume: 200,
+        eq_open: true,
+        pl_open: true,
+        active: true,
+        ..Default::default()
+    };
+    let mut eq = EqWindow::new();
+    let mut settings = alpagamp_core::eq::EqSettings::default();
+    settings.enabled = true;
+    settings.preamp = 36;
+    settings.bands = [44, 40, 34, 28, 26, 29, 34, 38, 42, 45];
+    let ev = EqView { eq: settings, active: false, volume: 200, balance: 0 };
+    let titles = [
+        ("Ruisseau de laine", 241_000u64),
+        ("Les Andes à vélo", 198_000),
+        ("Alpagamp - Chanson de test", 296_000),
+        ("Un titre vraiment très long qui ne tient pas dans la fenêtre de la playlist", 412_000),
+        ("Cullera, la nuit", 187_000),
+        ("Radio sans durée", 0),
+    ];
+    let mut entries: Vec<Entry> = titles
+        .iter()
+        .map(|(t, d)| Entry::with_meta(Source::File(PathBuf::from(format!("/m/{t}.mp3"))), Some(t.to_string()), (*d > 0).then_some(*d)))
+        .collect();
+    entries[3].selected = true;
+    let mut pl = PlaylistWindow::new(275, 116 + 29 * 2);
+    let pv = PlaylistView {
+        entries: &entries,
+        current: Some(2),
+        active: false,
+        total: TotalTime { ms: titles.iter().map(|t| t.1).sum(), partial: true, unknown: false },
+        selected: TotalTime { ms: 412_000, ..Default::default() },
+        time_text: "1:23".into(),
+    };
+    let mut fm = Image::new(1, 1, 0);
+    let mut fe = Image::new(1, 1, 0);
+    let mut fp = Image::new(1, 1, 0);
+    main.render(&mut fm, &skin, &mv);
+    eq.render(&mut fe, &skin, &ev);
+    pl.render(&mut fp, &skin, &pv);
+    let (w, h) = (275 * Z, (fm.height + fe.height + fp.height) * Z);
+    let mut buf = vec![0xFF00_0000u32; (w * h) as usize];
+    let mut y0 = 0;
+    for img in [&fm, &fe, &fp] {
+        for y in 0..img.height * Z {
+            for x in 0..img.width * Z {
+                buf[((y0 + y) * w + x) as usize] = img.pixels[((y / Z) * img.width + x / Z) as usize];
+            }
+        }
+        y0 += img.height * Z;
+    }
+    let pl_top = ((fm.height + fe.height) * Z) as usize;
+    let sub = &mut buf[pl_top * w as usize..];
+    alpagamp_ui::text::draw_runs(sub, w, fp.height * Z, Z as f32, &pl.text);
+    let mut img = Image::new(w, h, 0);
+    for (d, s) in img.pixels.iter_mut().zip(&buf) {
+        *d = 0xFF00_0000 | (s & 0x00FF_FFFF);
+    }
+    write_png(&out, &img, 1)?;
+    // Fenêtre générique « Aller au morceau ».
+    let mut g = alpagamp_ui::GenWindow::new(alpagamp_ui::GenKind::Jump);
+    g.key(alpagamp_ui::GenKey::Text("an".into()));
+    g.set_results(vec![1, 4]);
+    let gv = alpagamp_ui::GenView { entries: &entries, active: true, title: "Aller au morceau", prompt: "Rechercher :", ok_label: "Lire", cancel_label: "Fermer" };
+    let mut fg = Image::new(1, 1, 0);
+    g.render(&mut fg, &skin, &gv);
+    let (gw, gh) = (fg.width * Z, fg.height * Z);
+    let mut gbuf: Vec<u32> = (0..gw * gh).map(|i| fg.pixels[(((i / gw) / Z) * fg.width + (i % gw) / Z) as usize]).collect();
+    alpagamp_ui::text::draw_runs(&mut gbuf, gw, gh, Z as f32, &g.text);
+    let mut gimg = Image::new(gw, gh, 0);
+    for (d, s) in gimg.pixels.iter_mut().zip(&gbuf) {
+        *d = 0xFF00_0000 | (s & 0x00FF_FFFF);
+    }
+    let gen_path = out.with_file_name(format!("{}-gen.png", out.file_stem().unwrap().to_string_lossy()));
+    write_png(&gen_path, &gimg, 1)?;
+    println!("{} et {}", out.display(), gen_path.display());
     Ok(())
 }
 

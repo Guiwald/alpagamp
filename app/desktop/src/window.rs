@@ -1,9 +1,11 @@
-//! Une fenêtre système sans bordure qui affiche une image skin agrandie au pixel près.
+//! Une fenêtre système sans bordure qui affiche une image skin agrandie au pixel près, plus le texte vectoriel
+//! dessiné à la résolution de l'écran.
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
 
 use alpagamp_skin::Image;
+use alpagamp_ui::text::{TextRun, draw_runs};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowAttributes, WindowLevel};
@@ -16,29 +18,51 @@ pub struct SkinWindow {
     pub zoom: u32,
     /// Taille en pixels skin.
     pub skin_size: (u32, u32),
+    double: bool,
+}
+
+/// Options de création.
+pub struct WindowOptions<'a> {
+    pub title: &'a str,
+    pub skin_size: (u32, u32),
+    pub position: Option<(i32, i32)>,
+    pub on_top: bool,
+    pub double: bool,
+    /// Fenêtre secondaire : pas d'entrée dans la barre des tâches (Windows).
+    pub secondary: bool,
+    /// Fenêtre propriétaire (Windows) : les fenêtres secondaires suivent la principale (réduction, ordre).
+    pub owner: Option<&'a Window>,
 }
 
 impl SkinWindow {
-    pub fn new(
-        event_loop: &ActiveEventLoop,
-        title: &str,
-        skin_size: (u32, u32),
-        position: Option<(i32, i32)>,
-        on_top: bool,
-        double: bool,
-    ) -> Result<SkinWindow, String> {
+    pub fn new(event_loop: &ActiveEventLoop, o: WindowOptions) -> Result<SkinWindow, String> {
         let mut attrs = WindowAttributes::default()
-            .with_title(title)
+            .with_title(o.title)
             .with_decorations(false)
             .with_resizable(false)
             .with_visible(false)
-            .with_inner_size(PhysicalSize::new(skin_size.0, skin_size.1));
-        if let Some((x, y)) = position {
+            .with_inner_size(PhysicalSize::new(o.skin_size.0, o.skin_size.1));
+        if let Some((x, y)) = o.position {
             attrs = attrs.with_position(PhysicalPosition::new(x, y));
         }
-        if on_top {
+        if o.on_top {
             attrs = attrs.with_window_level(WindowLevel::AlwaysOnTop);
         }
+        #[cfg(target_os = "windows")]
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attrs = attrs.with_skip_taskbar(o.secondary);
+            if let Some(owner) = o.owner {
+                if let Ok(h) = owner.window_handle() {
+                    if let RawWindowHandle::Win32(h) = h.as_raw() {
+                        attrs = attrs.with_owner_window(h.hwnd.get());
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = (o.secondary, o.owner);
         let icon = alpagamp_skin::app_icon(64);
         let rgba: Vec<u8> = icon.pixels.iter().flat_map(|p| [(p >> 16) as u8, (p >> 8) as u8, *p as u8, (p >> 24) as u8]).collect();
         if let Ok(i) = winit::window::Icon::from_rgba(rgba, 64, 64) {
@@ -47,25 +71,44 @@ impl SkinWindow {
         let window = Rc::new(event_loop.create_window(attrs).map_err(|e| e.to_string())?);
         let context = softbuffer::Context::new(window.clone()).map_err(|e| e.to_string())?;
         let surface = softbuffer::Surface::new(&context, window.clone()).map_err(|e| e.to_string())?;
-        let mut w = SkinWindow { window, surface, _context: context, zoom: 1, skin_size };
-        w.update_zoom(double);
+        let mut w = SkinWindow { window, surface, _context: context, zoom: 1, skin_size: o.skin_size, double: o.double };
+        w.zoom = w.zoom_for(o.double);
+        w.apply_size();
         w.window.set_visible(true);
         Ok(w)
     }
 
-    /// Recalcule l'agrandissement (écran Retina, double taille) et redimensionne la fenêtre.
-    pub fn update_zoom(&mut self, double: bool) {
+    /// Agrandissement pour l'écran actuel (Retina ×2) et la double taille.
+    pub fn zoom_for(&self, double: bool) -> u32 {
         let sf = self.window.scale_factor();
-        let zoom = ((sf.round().max(1.0)) as u32) * if double { 2 } else { 1 };
-        self.zoom = zoom.max(1);
-        self.apply_size();
+        (((sf.round().max(1.0)) as u32) * if double { 2 } else { 1 }).max(1)
     }
 
-    pub fn set_skin_size(&mut self, size: (u32, u32)) {
-        if size != self.skin_size {
-            self.skin_size = size;
+    /// Taille physique qu'aurait la fenêtre avec cette taille skin et ce mode.
+    pub fn phys_size_for(&self, skin_size: (u32, u32), double: bool) -> (i32, i32) {
+        let z = self.zoom_for(double);
+        ((skin_size.0 * z) as i32, (skin_size.1 * z) as i32)
+    }
+
+    pub fn phys_size(&self) -> (i32, i32) {
+        ((self.skin_size.0 * self.zoom) as i32, (self.skin_size.1 * self.zoom) as i32)
+    }
+
+    /// Change la taille skin et/ou le mode double taille.
+    pub fn set_geometry(&mut self, skin_size: (u32, u32), double: bool) {
+        let zoom = self.zoom_for(double);
+        if skin_size != self.skin_size || zoom != self.zoom {
+            self.skin_size = skin_size;
+            self.zoom = zoom;
+            self.double = double;
             self.apply_size();
         }
+    }
+
+    /// Après un changement d'écran (facteur d'échelle).
+    pub fn rescale(&mut self) {
+        self.zoom = self.zoom_for(self.double);
+        self.apply_size();
     }
 
     fn apply_size(&mut self) {
@@ -82,13 +125,11 @@ impl SkinWindow {
         ((x / self.zoom as f64).floor() as i32, (y / self.zoom as f64).floor() as i32)
     }
 
-    /// Affiche l'image (agrandie au plus proche voisin).
-    pub fn present(&mut self, img: &Image) {
-        let size = self.window.inner_size();
-        let (bw, bh) = (size.width.max(1), size.height.max(1));
-        if let (Some(nw), Some(nh)) = (NonZeroU32::new(bw), NonZeroU32::new(bh)) {
-            let _ = self.surface.resize(nw, nh);
-        }
+    /// Affiche l'image (agrandie au plus proche voisin) puis le texte.
+    pub fn present(&mut self, img: &Image, text: &[TextRun]) {
+        let (bw, bh) = (self.skin_size.0 * self.zoom, self.skin_size.1 * self.zoom);
+        let (Some(nw), Some(nh)) = (NonZeroU32::new(bw), NonZeroU32::new(bh)) else { return };
+        let _ = self.surface.resize(nw, nh);
         let Ok(mut buf) = self.surface.buffer_mut() else { return };
         let z = self.zoom.max(1);
         for y in 0..bh {
@@ -99,6 +140,9 @@ impl SkinWindow {
                 let sx = (x as u32 / z).min(img.width.saturating_sub(1));
                 *d = src_row[sx as usize] & 0x00FF_FFFF;
             }
+        }
+        if !text.is_empty() {
+            draw_runs(&mut buf, bw, bh, z as f32, text);
         }
         let _ = buf.present();
     }

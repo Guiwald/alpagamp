@@ -1,18 +1,29 @@
-//! Menus natifs (macOS, Windows) : menu contextuel et barre de menus macOS.
+//! Menus natifs (macOS, Windows) : menu principal (clic droit), barre de menus macOS et menus surgissants
+//! (préréglages de l'égaliseur, menus de la playlist).
 
 use std::path::{Path, PathBuf};
 
 use alpagamp_core::Settings;
+use alpagamp_core::eq::factory_presets;
 use alpagamp_core::i18n::{Lang, t};
+use alpagamp_core::playlist::SortKey;
 use alpagamp_core::settings::VisMode;
 use muda::{CheckMenuItem, ContextMenu, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::command::Command;
+use crate::command::{Command, Popup};
+
+/// État utile pour construire les menus.
+pub struct MenuState<'a> {
+    pub settings: &'a Settings,
+    pub eq_open: bool,
+    pub pl_open: bool,
+    /// Un préréglage automatique existe pour le morceau courant.
+    pub has_auto_preset: bool,
+}
 
 pub struct Menus {
-    context: Menu,
     #[cfg(target_os = "macos")]
     _bar: Menu,
     skins: Vec<PathBuf>,
@@ -31,9 +42,10 @@ fn sep() -> PredefinedMenuItem {
 }
 
 impl Menus {
-    pub fn new(settings: &Settings, skins_dir: &Path) -> Menus {
+    pub fn new(st: &MenuState, skins_dir: &Path) -> Menus {
         let skins = list_skins(skins_dir);
-        let context = build_context(settings, &skins);
+        #[cfg(not(target_os = "macos"))]
+        let _ = st;
         #[cfg(target_os = "macos")]
         let bar = {
             let bar = Menu::new();
@@ -44,42 +56,33 @@ impl Menus {
             )
             .expect("menu");
             let _ = bar.append(&app);
-            let file = Submenu::with_items("File", true, &[&item("play_file", "menu.play_file"), &item("play_folder", "menu.play_folder")]).expect("menu");
-            let _ = bar.append(&file);
+            let _ = bar.append(&file_submenu());
             let _ = bar.append(&playback_submenu());
-            let _ = bar.append(&options_submenu(settings));
+            let _ = bar.append(&windows_submenu(st));
+            let _ = bar.append(&options_submenu(st.settings));
             let _ = bar.append(&skins_submenu(&skins));
-            let _ = bar.append(&vis_submenu(settings));
+            let _ = bar.append(&vis_submenu(st.settings));
             bar.init_for_nsapp();
             bar
         };
         Menus {
-            context,
             #[cfg(target_os = "macos")]
             _bar: bar,
             skins,
         }
     }
 
-    /// Reconstruit après un changement de réglage (coches) ou de langue.
-    pub fn refresh(&mut self, settings: &Settings, skins_dir: &Path) {
-        *self = Menus::new(settings, skins_dir);
-    }
-
-    /// Affiche le menu contextuel sous la souris.
-    pub fn popup(&self, window: &Window) {
-        let Ok(handle) = window.window_handle() else { return };
-        match handle.as_raw() {
-            #[cfg(target_os = "macos")]
-            RawWindowHandle::AppKit(h) => unsafe {
-                self.context.show_context_menu_for_nsview(h.ns_view.as_ptr() as _, None);
-            },
-            #[cfg(target_os = "windows")]
-            RawWindowHandle::Win32(h) => unsafe {
-                self.context.show_context_menu_for_hwnd(h.hwnd.get() as _, None);
-            },
-            _ => {}
-        }
+    /// Affiche un menu sous la souris, au-dessus de `window`.
+    pub fn popup(&self, which: Popup, st: &MenuState, window: &Window) {
+        let menu = match which {
+            Popup::Main => build_main(st, &self.skins),
+            Popup::EqPresets => build_eq_presets(st),
+            Popup::PlRemoveMisc => build_list(&[("pl_remove_missing", "pl.remove_missing"), ("pl_remove_dups", "pl.remove_duplicates")]),
+            Popup::PlSort => build_sort(),
+            Popup::PlMisc => build_list(&[("jump", "menu.jump_to_file"), ("pl_info", "menu.file_info")]),
+            Popup::PlContext => build_pl_context(),
+        };
+        show(&menu, window);
     }
 
     /// Commandes choisies dans les menus depuis le dernier appel.
@@ -122,6 +125,37 @@ impl Menus {
             "about" => About,
             "exit" => Exit,
             "lang_system" => Language(None),
+            "win_eq" => ToggleEqWindow,
+            "win_pl" => TogglePlaylistWindow,
+            "jump" => JumpToFile,
+            "eq_on" => ToggleEq,
+            "eq_auto" => ToggleEqAuto,
+            "eq_load_file" => EqLoadFile,
+            "eq_save_file" => EqSaveFile,
+            "eq_save_auto" => EqSaveAuto,
+            "eq_delete_auto" => EqDeleteAuto,
+            "eq_reset" => EqReset,
+            "pl_add_files" => PlAddFiles,
+            "pl_add_folder" => PlAddFolder,
+            "pl_add_url" => PlAddUrl,
+            "pl_remove_sel" => PlRemoveSelected,
+            "pl_crop" => PlCrop,
+            "pl_remove_all" => PlRemoveAll,
+            "pl_remove_missing" => PlRemoveMissing,
+            "pl_remove_dups" => PlRemoveDuplicates,
+            "pl_select_all" => PlSelectAll,
+            "pl_select_none" => PlSelectNone,
+            "pl_invert" => PlInvertSelection,
+            "pl_sort_title" => PlSort(SortKey::Title),
+            "pl_sort_file" => PlSort(SortKey::FileName),
+            "pl_sort_path" => PlSort(SortKey::Path),
+            "pl_reverse" => PlReverse,
+            "pl_randomize" => PlRandomize,
+            "pl_new" => PlNew,
+            "pl_save" => PlSave,
+            "pl_load" => PlLoad,
+            "pl_info" => PlFileInfo,
+            "pl_play" => PlPlaySelected,
             other => {
                 if let Some(code) = other.strip_prefix("lang_") {
                     return Lang::ALL.into_iter().find(|l| l.code() == code).map(|l| Language(Some(l)));
@@ -129,10 +163,38 @@ impl Menus {
                 if let Some(i) = other.strip_prefix("skin_").and_then(|n| n.parse::<usize>().ok()) {
                     return self.skins.get(i).cloned().map(SkinFile);
                 }
+                if let Some(i) = other.strip_prefix("eqp_").and_then(|n| n.parse::<usize>().ok()) {
+                    return Some(EqPreset(i));
+                }
                 return None;
             }
         })
     }
+}
+
+fn show(menu: &Menu, window: &Window) {
+    let Ok(handle) = window.window_handle() else { return };
+    match handle.as_raw() {
+        #[cfg(target_os = "macos")]
+        RawWindowHandle::AppKit(h) => unsafe {
+            menu.show_context_menu_for_nsview(h.ns_view.as_ptr() as _, None);
+        },
+        #[cfg(target_os = "windows")]
+        RawWindowHandle::Win32(h) => unsafe {
+            menu.show_context_menu_for_hwnd(h.hwnd.get() as _, None);
+        },
+        _ => {}
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn file_submenu() -> Submenu {
+    Submenu::with_items(
+        t("menu.file"),
+        true,
+        &[&item("play_file", "menu.play_file"), &item("play_folder", "menu.play_folder"), &sep(), &item("pl_load", "pl.load"), &item("pl_save", "pl.save"), &sep(), &item("file_info", "menu.file_info")],
+    )
+    .expect("menu")
 }
 
 fn playback_submenu() -> Submenu {
@@ -151,9 +213,16 @@ fn playback_submenu() -> Submenu {
             &sep(),
             &item("back5", "menu.back5"),
             &item("fwd5", "menu.fwd5"),
+            &sep(),
+            &item("jump", "menu.jump_to_file"),
         ],
     )
     .expect("menu")
+}
+
+#[cfg(target_os = "macos")]
+fn windows_submenu(st: &MenuState) -> Submenu {
+    Submenu::with_items(t("menu.windows"), true, &[&check("win_eq", "menu.equalizer", st.eq_open), &check("win_pl", "menu.playlist_editor", st.pl_open)]).expect("menu")
 }
 
 fn options_submenu(s: &Settings) -> Submenu {
@@ -209,7 +278,7 @@ fn vis_submenu(s: &Settings) -> Submenu {
     .expect("menu")
 }
 
-fn build_context(s: &Settings, skins: &[PathBuf]) -> Menu {
+fn build_main(st: &MenuState, skins: &[PathBuf]) -> Menu {
     let m = Menu::new();
     let _ = m.append(&item("about", "menu.about"));
     let _ = m.append(&sep());
@@ -217,12 +286,83 @@ fn build_context(s: &Settings, skins: &[PathBuf]) -> Menu {
     let _ = m.append(&item("play_folder", "menu.play_folder"));
     let _ = m.append(&item("file_info", "menu.file_info"));
     let _ = m.append(&sep());
+    let _ = m.append(&check("win_eq", "menu.equalizer", st.eq_open));
+    let _ = m.append(&check("win_pl", "menu.playlist_editor", st.pl_open));
+    let _ = m.append(&sep());
     let _ = m.append(&playback_submenu());
-    let _ = m.append(&options_submenu(s));
+    let _ = m.append(&options_submenu(st.settings));
     let _ = m.append(&skins_submenu(skins));
-    let _ = m.append(&vis_submenu(s));
+    let _ = m.append(&vis_submenu(st.settings));
     let _ = m.append(&sep());
     let _ = m.append(&item("exit", "menu.exit"));
+    m
+}
+
+fn build_eq_presets(st: &MenuState) -> Menu {
+    let m = Menu::new();
+    let load = Submenu::new(t("eq.load"), true);
+    for (i, p) in factory_presets().iter().enumerate() {
+        let _ = load.append(&MenuItem::with_id(format!("eqp_{i}"), &p.name, true, None));
+    }
+    let _ = load.append(&sep());
+    let _ = load.append(&item("eq_load_file", "eq.from_file"));
+    let _ = m.append(&load);
+    let save = Submenu::with_items(t("eq.save"), true, &[&item("eq_save_file", "eq.to_file"), &item("eq_save_auto", "eq.auto_preset")]).expect("menu");
+    let _ = m.append(&save);
+    let _ = m.append(&MenuItem::with_id("eq_delete_auto", t("eq.delete_auto"), st.has_auto_preset, None));
+    let _ = m.append(&sep());
+    let _ = m.append(&check("eq_on", "eq.enabled", st.settings.eq.enabled));
+    let _ = m.append(&check("eq_auto", "eq.auto", st.settings.eq.auto));
+    let _ = m.append(&sep());
+    let _ = m.append(&item("eq_reset", "eq.reset"));
+    m
+}
+
+fn build_list(items: &[(&str, &str)]) -> Menu {
+    let m = Menu::new();
+    for (id, key) in items {
+        let _ = m.append(&item(id, key));
+    }
+    m
+}
+
+fn build_sort() -> Menu {
+    build_list(&[
+        ("pl_sort_title", "pl.sort_title"),
+        ("pl_sort_file", "pl.sort_filename"),
+        ("pl_sort_path", "pl.sort_path"),
+        ("pl_reverse", "pl.reverse"),
+        ("pl_randomize", "pl.randomize"),
+    ])
+}
+
+fn build_pl_context() -> Menu {
+    let m = Menu::new();
+    let _ = m.append(&item("pl_play", "pl.play_item"));
+    let _ = m.append(&item("pl_info", "menu.file_info"));
+    let _ = m.append(&sep());
+    let _ = m.append(&item("pl_remove_sel", "pl.remove_selected"));
+    let _ = m.append(&item("pl_crop", "pl.crop"));
+    let _ = m.append(&sep());
+    let _ = m.append(&item("pl_select_all", "pl.select_all"));
+    let _ = m.append(&item("pl_select_none", "pl.select_none"));
+    let _ = m.append(&item("pl_invert", "pl.invert"));
+    let _ = m.append(&sep());
+    let sort = Submenu::new(t("pl.sort"), true);
+    for (id, key) in [
+        ("pl_sort_title", "pl.sort_title"),
+        ("pl_sort_file", "pl.sort_filename"),
+        ("pl_sort_path", "pl.sort_path"),
+        ("pl_reverse", "pl.reverse"),
+        ("pl_randomize", "pl.randomize"),
+    ] {
+        let _ = sort.append(&item(id, key));
+    }
+    let _ = m.append(&sort);
+    let _ = m.append(&sep());
+    let _ = m.append(&item("pl_add_files", "pl.add_files"));
+    let _ = m.append(&item("pl_add_folder", "pl.add_folder"));
+    let _ = m.append(&item("pl_add_url", "pl.add_url"));
     m
 }
 

@@ -8,6 +8,8 @@ pub struct Paths {
     pub settings: PathBuf,
     pub playlist: PathBuf,
     pub skins_dir: PathBuf,
+    /// Préréglages d'égaliseur automatiques (un par morceau, au format bibliothèque `.eqf`).
+    pub eq_auto: PathBuf,
 }
 
 impl Paths {
@@ -19,6 +21,7 @@ impl Paths {
             settings: config_dir.join("settings.toml"),
             playlist: config_dir.join("playlist.m3u8"),
             skins_dir: config_dir.join("skins"),
+            eq_auto: config_dir.join("eq-auto.eqf"),
             config_dir,
         }
     }

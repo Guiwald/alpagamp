@@ -1,15 +1,20 @@
-//! L'application de bureau : fenêtres, événements, commandes.
+//! L'application de bureau : les quatre fenêtres (principale, égaliseur, playlist, fenêtre générique), leurs
+//! événements, l'aimantation et les commandes.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use alpagamp_audio::PlayState;
+use alpagamp_audio::{Decoder, PlayState};
+use alpagamp_core::eq::{CENTER, EqPreset as Preset, factory_presets, read_eqf, write_eqf};
+use alpagamp_core::formats::{read_playlist_bytes, write_m3u, write_pls};
 use alpagamp_core::i18n::{self, Lang, t};
 use alpagamp_core::settings::{VisMode, WindowState};
 use alpagamp_core::time::format_duration;
-use alpagamp_core::Settings;
+use alpagamp_core::{Entry, Settings, Source};
 use alpagamp_skin::{Image, Skin};
-use alpagamp_ui::{Action, MainWindow, Mods};
+use alpagamp_ui::{
+    Action, EqView, EqWindow, GenKind, GenView, GenWindow, MainWindow, Mods, PlMenuItem, PlaylistView, PlaylistWindow,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -17,37 +22,86 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::ModifiersState;
 use winit::window::{WindowId, WindowLevel};
 
-use crate::command::Command;
+use crate::command::{Command, Popup};
 use crate::dialogs;
-use crate::keys;
+use crate::keys::{self, Focus};
+use crate::layout::{self, R};
 use crate::paths::Paths;
 use crate::player::Player;
-use crate::window::SkinWindow;
+use crate::window::{SkinWindow, WindowOptions};
 
+/// Distance d'aimantation, en pixels skin.
 const SNAP: i32 = 10;
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Main = 0,
+    Eq = 1,
+    Playlist = 2,
+    Gen = 3,
+}
+
+const KINDS: [Kind; 4] = [Kind::Main, Kind::Eq, Kind::Playlist, Kind::Gen];
+
+/// Une fenêtre système et son état.
+struct Slot {
+    win: Option<SkinWindow>,
+    fb: Image,
+    /// Coin haut-gauche (pixels physiques), tenu à jour par l'application.
+    pos: Option<(i32, i32)>,
+    open: bool,
+    /// Position de la souris dans la fenêtre (pixels physiques).
+    cursor: (f64, f64),
+}
+
+impl Slot {
+    fn new(open: bool, pos: Option<(i32, i32)>) -> Slot {
+        Slot { win: None, fb: Image::new(1, 1, 0), pos, open, cursor: (0.0, 0.0) }
+    }
+
+    fn visible(&self) -> bool {
+        self.open && self.win.is_some()
+    }
+}
+
+/// Déplacement de fenêtre(s) en cours.
+struct Moving {
+    kind: Kind,
+    /// Point saisi, relatif à la fenêtre (pixels physiques).
+    grab: (f64, f64),
+    /// Fenêtres déplacées ensemble (la principale entraîne celles qui lui sont collées).
+    group: Vec<Kind>,
+}
 
 pub struct App {
     paths: Paths,
     player: Player,
     default_skin: Skin,
     skin: Skin,
-    main: Option<SkinWindow>,
+    slots: [Slot; 4],
     main_ui: MainWindow,
-    fb: Image,
+    eq_ui: EqWindow,
+    pl_ui: PlaylistWindow,
+    gen_ui: GenWindow,
     mods: ModifiersState,
-    /// Position de la souris dans la fenêtre principale (pixels physiques).
-    cursor: (f64, f64),
-    /// Déplacement de fenêtre en cours : point saisi (pixels physiques, relatif à la fenêtre).
-    moving: Option<(f64, f64)>,
-    last_click: Option<(Instant, i32, i32)>,
+    moving: Option<Moving>,
+    last_click: Option<(Instant, Kind, i32, i32)>,
     start: Instant,
     last_frame: Instant,
+    next_frame: Instant,
     vis_l: Vec<f32>,
     vis_r: Vec<f32>,
-    dropped: Vec<PathBuf>,
+    dropped: Vec<(Kind, PathBuf)>,
     pending_args: Vec<PathBuf>,
-    focused: bool,
+    focused: Option<Kind>,
+    /// Les fenêtres secondaires ont été cachées en même temps que la principale a été réduite.
+    hidden_by_minimize: bool,
+    eq_status_shown: bool,
+    /// Préréglages d'égaliseur automatiques (nom = nom du fichier du morceau).
+    auto_presets: Vec<Preset>,
+    started: bool,
+    menus_dirty: bool,
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     menus: Option<crate::menu::Menus>,
 }
@@ -63,34 +117,69 @@ impl App {
             .as_ref()
             .and_then(|p| std::fs::read(p).ok().and_then(|b| Skin::load_wsz(&p.display().to_string(), &b, &default_skin).ok()))
             .unwrap_or_else(|| default_skin.clone());
+        let auto_presets = std::fs::read(&paths.eq_auto).ok().and_then(|b| read_eqf(&b).ok()).unwrap_or_default();
         let mut player = Player::new(settings);
         if args.is_empty() {
             player.load_playlist_file(&paths.playlist);
         }
+        let s = &player.settings;
         let mut main_ui = MainWindow::new();
-        main_ui.shade = player.settings.main_window.map(|w| w.shade).unwrap_or(false);
+        main_ui.shade = s.main_window.map(|w| w.shade).unwrap_or(false);
+        let mut eq_ui = EqWindow::new();
+        eq_ui.shade = s.eq_window.map(|w| w.shade).unwrap_or(false);
+        let mut pl_ui = match s.playlist_window {
+            Some(w) if w.w > 0 && w.h > 0 => PlaylistWindow::new(w.w, w.h),
+            _ => PlaylistWindow::default(),
+        };
+        pl_ui.shade = s.playlist_window.map(|w| w.shade).unwrap_or(false);
+        let pos = |w: Option<WindowState>| w.map(|w| (w.x, w.y));
+        let slots = [
+            Slot::new(true, pos(s.main_window)),
+            Slot::new(s.eq_window.map(|w| w.open).unwrap_or(true), pos(s.eq_window)),
+            Slot::new(s.playlist_window.map(|w| w.open).unwrap_or(true), pos(s.playlist_window)),
+            Slot::new(false, None),
+        ];
         App {
             paths,
             player,
             default_skin,
             skin,
-            main: None,
+            slots,
             main_ui,
-            fb: Image::new(275, 116, 0),
+            eq_ui,
+            pl_ui,
+            gen_ui: GenWindow::new(GenKind::Jump),
             mods: ModifiersState::empty(),
-            cursor: (0.0, 0.0),
             moving: None,
             last_click: None,
             start: Instant::now(),
             last_frame: Instant::now(),
+            next_frame: Instant::now(),
             vis_l: vec![0.0; alpagamp_ui::vis::WINDOW],
             vis_r: vec![0.0; alpagamp_ui::vis::WINDOW],
             dropped: Vec::new(),
             pending_args: args,
-            focused: true,
+            focused: None,
+            hidden_by_minimize: false,
+            eq_status_shown: false,
+            auto_presets,
+            started: false,
+            menus_dirty: false,
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             menus: None,
         }
+    }
+
+    fn slot(&self, k: Kind) -> &Slot {
+        &self.slots[k as usize]
+    }
+
+    fn slot_mut(&mut self, k: Kind) -> &mut Slot {
+        &mut self.slots[k as usize]
+    }
+
+    fn kind_of(&self, id: WindowId) -> Option<Kind> {
+        KINDS.into_iter().find(|&k| self.slot(k).win.as_ref().is_some_and(|w| w.window.id() == id))
     }
 
     fn mods(&self) -> Mods {
@@ -98,34 +187,228 @@ impl App {
         Mods { shift: self.mods.shift_key(), ctrl, alt: self.mods.alt_key() }
     }
 
-    fn refresh_menus(&mut self) {
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        if let Some(m) = self.menus.as_mut() {
-            m.refresh(&self.player.settings, &self.paths.skins_dir);
+    fn skin_size(&self, k: Kind) -> (u32, u32) {
+        match k {
+            Kind::Main => self.main_ui.size(),
+            Kind::Eq => self.eq_ui.size(),
+            Kind::Playlist => self.pl_ui.size(),
+            Kind::Gen => self.gen_ui.size(),
         }
     }
 
-    fn popup_menu(&self) {
+    /// La double taille s'applique à la fenêtre principale et à l'égaliseur (comme Winamp 2).
+    fn double_for(&self, k: Kind) -> bool {
+        self.player.settings.double_size && matches!(k, Kind::Main | Kind::Eq)
+    }
+
+    fn title_for(&self, k: Kind) -> String {
+        match k {
+            Kind::Main => "Alpagamp".into(),
+            Kind::Eq => format!("Alpagamp – {}", t("menu.equalizer")),
+            Kind::Playlist => format!("Alpagamp – {}", t("menu.playlist_editor")),
+            Kind::Gen => match self.gen_ui.kind {
+                GenKind::Jump => format!("Alpagamp – {}", t("jump.title")),
+                GenKind::AddUrl => format!("Alpagamp – {}", t("url.title")),
+            },
+        }
+    }
+
+    /// Rectangles physiques des fenêtres visibles.
+    fn rects(&self) -> Vec<Option<R>> {
+        KINDS
+            .iter()
+            .map(|&k| {
+                let s = self.slot(k);
+                match (s.visible(), s.pos, s.win.as_ref()) {
+                    (true, Some((x, y)), Some(w)) => {
+                        let (pw, ph) = w.phys_size();
+                        Some(R::new(x, y, pw, ph))
+                    }
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    fn set_pos(&mut self, k: Kind, x: i32, y: i32) {
+        let s = self.slot_mut(k);
+        if s.pos != Some((x, y)) {
+            s.pos = Some((x, y));
+            if let Some(w) = &s.win {
+                w.window.set_outer_position(PhysicalPosition::new(x, y));
+            }
+        }
+    }
+
+    fn apply_rects(&mut self, rects: &[Option<R>]) {
+        for (i, r) in rects.iter().enumerate() {
+            if let Some(r) = r {
+                self.set_pos(KINDS[i], r.x, r.y);
+            }
+        }
+    }
+
+    // --- Ouverture et taille des fenêtres -------------------------------------------------------------
+
+    fn create_window(&mut self, k: Kind, event_loop: &ActiveEventLoop) {
+        if self.slot(k).win.is_some() {
+            return;
+        }
+        let title = self.title_for(k);
+        let owner = if k == Kind::Main { None } else { self.slot(Kind::Main).win.as_ref().map(|w| w.window.clone()) };
+        let opts = WindowOptions {
+            title: &title,
+            skin_size: self.skin_size(k),
+            position: self.slot(k).pos,
+            on_top: self.player.settings.always_on_top,
+            double: self.double_for(k),
+            secondary: k != Kind::Main,
+            owner: owner.as_deref(),
+        };
+        match SkinWindow::new(event_loop, opts) {
+            Ok(w) => {
+                if self.slot(k).pos.is_none() {
+                    self.slot_mut(k).pos = w.window.outer_position().ok().map(|p| (p.x, p.y));
+                }
+                self.slot_mut(k).win = Some(w);
+            }
+            Err(e) => log::error!("fenêtre impossible : {e}"),
+        }
+    }
+
+    /// Place une fenêtre secondaire qui n'a pas encore de position : sous la dernière fenêtre empilée sous la
+    /// principale.
+    fn default_position(&self, k: Kind) -> Option<(i32, i32)> {
+        let (mx, my) = self.slot(Kind::Main).pos?;
+        let mw = self.slot(Kind::Main).win.as_ref()?;
+        let mut y = my + mw.phys_size().1;
+        for other in [Kind::Eq, Kind::Playlist] {
+            if other == k {
+                break;
+            }
+            if let (true, Some(w)) = (self.slot(other).visible(), self.slot(other).win.as_ref()) {
+                y += w.phys_size().1;
+            }
+        }
+        if k == Kind::Gen {
+            let w = mw.phys_size().0;
+            return Some((mx + w + 20, my));
+        }
+        Some((mx, y))
+    }
+
+    fn set_open(&mut self, k: Kind, open: bool, event_loop: &ActiveEventLoop) {
+        if k == Kind::Main {
+            return;
+        }
+        if open {
+            if self.slot(k).pos.is_none() {
+                let p = self.default_position(k);
+                self.slot_mut(k).pos = p;
+            }
+            self.slot_mut(k).open = true;
+            if self.slot(k).win.is_none() {
+                self.create_window(k, event_loop);
+            } else if let Some(w) = &self.slot(k).win {
+                w.window.set_visible(true);
+                w.window.request_redraw();
+            }
+            if let Some(w) = &self.slot(k).win {
+                w.window.focus_window();
+            }
+        } else {
+            self.slot_mut(k).open = false;
+            if let Some(w) = &self.slot(k).win {
+                w.window.set_visible(false);
+            }
+            if self.focused == Some(k) {
+                self.focused = None;
+                if let Some(w) = &self.slot(Kind::Main).win {
+                    w.window.focus_window();
+                }
+            }
+        }
+        self.menus_dirty = true;
+    }
+
+    /// Applique la taille skin courante d'une fenêtre (bandeau, double taille, redimensionnement) en décalant
+    /// les fenêtres collées sous elle ou à sa droite.
+    fn relayout(&mut self, k: Kind) {
+        let size = self.skin_size(k);
+        let double = self.double_for(k);
+        let Some(w) = self.slot(k).win.as_ref() else { return };
+        let (nw, nh) = w.phys_size_for(size, double);
+        let rects = self.rects();
+        if rects[k as usize].is_some() {
+            let out = layout::resize(&rects, k as usize, nw, nh);
+            self.apply_rects(&out);
+        }
+        if let Some(w) = self.slot_mut(k).win.as_mut() {
+            w.set_geometry(size, double);
+        }
+    }
+
+    // --- Menus ----------------------------------------------------------------------------------------
+
+    fn current_file_name(&self) -> Option<String> {
+        match &self.player.playlist.current_entry()?.source {
+            Source::File(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()),
+            _ => None,
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn menu_state(&self) -> crate::menu::MenuState<'_> {
+        let name = self.current_file_name();
+        crate::menu::MenuState {
+            settings: &self.player.settings,
+            eq_open: self.slot(Kind::Eq).open,
+            pl_open: self.slot(Kind::Playlist).open,
+            has_auto_preset: name.is_some_and(|n| self.auto_presets.iter().any(|p| p.name == n)),
+        }
+    }
+
+    fn refresh_menus(&mut self) {
         #[cfg(any(target_os = "macos", target_os = "windows"))]
-        if let (Some(m), Some(w)) = (self.menus.as_ref(), self.main.as_ref()) {
-            m.popup(&w.window);
+        {
+            let st = self.menu_state();
+            let menus = crate::menu::Menus::new(&st, &self.paths.skins_dir);
+            self.menus = Some(menus);
+        }
+    }
+
+    #[allow(unused_variables)]
+    fn popup(&self, which: Popup, over: Kind) {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if let (Some(m), Some(w)) = (self.menus.as_ref(), self.slot(over).win.as_ref()) {
+            m.popup(which, &self.menu_state(), &w.window);
         }
     }
 
     fn save(&mut self) {
-        if let Some(w) = &self.main {
-            if let Ok(p) = w.window.outer_position() {
-                self.player.settings.main_window = Some(WindowState { x: p.x, y: p.y, open: true, shade: self.main_ui.shade, w: 275, h: 116 });
-            }
+        let state = |s: &Slot, shade: bool, size: (u32, u32)| s.pos.map(|(x, y)| WindowState { x, y, open: s.open, shade, w: size.0, h: size.1 });
+        let st = &mut self.player.settings;
+        if let Some(w) = state(&self.slots[0], self.main_ui.shade, (275, 116)) {
+            st.main_window = Some(w);
         }
-        self.player.settings.resume_index = self.player.playlist.current();
-        if let Err(e) = self.player.settings.save(&self.paths.settings) {
+        if let Some(w) = state(&self.slots[1], self.eq_ui.shade, (275, 116)) {
+            st.eq_window = Some(w);
+        } else if let Some(w) = st.eq_window.as_mut() {
+            w.open = self.slots[1].open;
+        }
+        if let Some(w) = state(&self.slots[2], self.pl_ui.shade, (self.pl_ui.w, self.pl_ui.h)) {
+            st.playlist_window = Some(w);
+        } else if let Some(w) = st.playlist_window.as_mut() {
+            w.open = self.slots[2].open;
+        }
+        st.resume_index = self.player.playlist.current();
+        if let Err(e) = st.save(&self.paths.settings) {
             log::warn!("réglages non enregistrés : {e}");
         }
         self.player.save_playlist_file(&self.paths.playlist);
     }
 
-    // --- Skins --------------------------------------------------------------------------------------
+    // --- Skins ----------------------------------------------------------------------------------------
 
     fn load_skin(&mut self, path: &Path) {
         let result = std::fs::read(path).map_err(|e| e.to_string()).and_then(|b| {
@@ -146,22 +429,23 @@ impl App {
                 }
                 self.skin = skin;
                 self.player.settings.skin = Some(stored);
-                self.refresh_menus();
+                self.menus_dirty = true;
             }
             Err(e) => dialogs::message(t("error.skin"), &format!("{}\n\n{e}", path.display())),
         }
-        self.request_redraw();
     }
 
     fn request_redraw(&self) {
-        if let Some(w) = &self.main {
-            w.window.request_redraw();
+        for s in &self.slots {
+            if let (true, Some(w)) = (s.open, &s.win) {
+                w.window.request_redraw();
+            }
         }
     }
 
-    // --- Commandes ----------------------------------------------------------------------------------
+    // --- Actions des fenêtres -------------------------------------------------------------------------
 
-    fn action(&mut self, a: Action, event_loop: &ActiveEventLoop) {
+    fn action(&mut self, from: Kind, a: Action, event_loop: &ActiveEventLoop) {
         use Command as C;
         let cmd = match a {
             Action::Previous(m) if m.ctrl => C::First,
@@ -192,15 +476,24 @@ impl App {
             }
             Action::ToggleShuffle => C::ToggleShuffle,
             Action::ToggleRepeat => C::ToggleRepeat,
-            Action::ToggleEqWindow | Action::TogglePlaylistWindow => {
-                self.main_ui.marquee.flash("EQ / PLAYLIST : V0.2");
+            Action::ToggleEqWindow => C::ToggleEqWindow,
+            Action::TogglePlaylistWindow => C::TogglePlaylistWindow,
+            Action::Close => match from {
+                Kind::Main => C::Exit,
+                Kind::Eq => C::ToggleEqWindow,
+                Kind::Playlist => C::TogglePlaylistWindow,
+                Kind::Gen => {
+                    self.set_open(Kind::Gen, false, event_loop);
+                    return;
+                }
+            },
+            Action::Minimize => C::Minimize,
+            Action::ToggleShade => {
+                self.toggle_shade(from);
                 return;
             }
-            Action::Close => C::Exit,
-            Action::Minimize => C::Minimize,
-            Action::ToggleShade => C::ToggleShade,
             Action::OptionsMenu | Action::VisMenu => {
-                self.popup_menu();
+                self.popup(Popup::Main, from);
                 return;
             }
             Action::ToggleAlwaysOnTop => C::ToggleAlwaysOnTop,
@@ -210,13 +503,146 @@ impl App {
             Action::CycleVisMode => C::Vis(self.player.settings.vis.mode.cycle()),
             Action::ToggleVisPlugin => return,
             Action::StartMove => {
-                self.moving = Some(self.cursor);
+                self.start_move(from);
                 return;
             }
             Action::About => C::About,
+            Action::SetEqBand(i, v) => {
+                let mut eq = self.player.settings.eq;
+                eq.bands[i.min(9)] = v;
+                self.player.set_eq(eq);
+                return;
+            }
+            Action::SetPreamp(v) => {
+                let mut eq = self.player.settings.eq;
+                eq.preamp = v;
+                self.player.set_eq(eq);
+                return;
+            }
+            Action::SetEqAllBands(v) => {
+                let mut eq = self.player.settings.eq;
+                eq.bands = [v; 10];
+                self.player.set_eq(eq);
+                return;
+            }
+            Action::ToggleEqEnabled => C::ToggleEq,
+            Action::ToggleEqAuto => C::ToggleEqAuto,
+            Action::EqPresetsMenu => {
+                self.popup(Popup::EqPresets, Kind::Eq);
+                return;
+            }
+            Action::PlaylistClick { index, shift, ctrl } => {
+                self.player.playlist.click(index, shift, ctrl);
+                return;
+            }
+            Action::PlaylistPlay(i) => {
+                self.player.play_index(i);
+                return;
+            }
+            Action::PlaylistMoveSelection(d) => C::PlMoveSelection(d),
+            Action::PlaylistResize(_, _) => {
+                self.relayout(Kind::Playlist);
+                return;
+            }
+            Action::PlaylistMenu(item) => match item {
+                PlMenuItem::AddUrl => C::PlAddUrl,
+                PlMenuItem::AddDir => C::PlAddFolder,
+                PlMenuItem::AddFile => C::PlAddFiles,
+                PlMenuItem::RemoveAll => C::PlRemoveAll,
+                PlMenuItem::Crop => C::PlCrop,
+                PlMenuItem::RemoveSelected => C::PlRemoveSelected,
+                PlMenuItem::RemoveMisc => {
+                    self.popup(Popup::PlRemoveMisc, Kind::Playlist);
+                    return;
+                }
+                PlMenuItem::InvertSelection => C::PlInvertSelection,
+                PlMenuItem::SelectNone => C::PlSelectNone,
+                PlMenuItem::SelectAll => C::PlSelectAll,
+                PlMenuItem::Sort => {
+                    self.popup(Popup::PlSort, Kind::Playlist);
+                    return;
+                }
+                PlMenuItem::FileInfo => C::PlFileInfo,
+                PlMenuItem::MiscOptions => {
+                    self.popup(Popup::PlMisc, Kind::Playlist);
+                    return;
+                }
+                PlMenuItem::NewList => C::PlNew,
+                PlMenuItem::SaveList => C::PlSave,
+                PlMenuItem::LoadList => C::PlLoad,
+            },
+            Action::JumpTo(i) => {
+                self.set_open(Kind::Gen, false, event_loop);
+                self.player.play_index(i);
+                self.pl_ui.ensure_visible(i);
+                return;
+            }
+            Action::SubmitUrl(url) => {
+                self.set_open(Kind::Gen, false, event_loop);
+                self.player.playlist.extend([Entry::new(Source::parse(&url, None))]);
+                self.player.playlist_changed();
+                return;
+            }
         };
         self.command(cmd, event_loop);
     }
+
+    fn toggle_shade(&mut self, k: Kind) {
+        match k {
+            Kind::Main => self.main_ui.shade = !self.main_ui.shade,
+            Kind::Eq => self.eq_ui.shade = !self.eq_ui.shade,
+            Kind::Playlist => self.pl_ui.shade = !self.pl_ui.shade,
+            Kind::Gen => return,
+        }
+        self.relayout(k);
+    }
+
+    fn start_move(&mut self, k: Kind) {
+        let rects = self.rects();
+        let group = if k == Kind::Main {
+            layout::docked_group(&rects, Kind::Main as usize).into_iter().map(|i| KINDS[i]).collect()
+        } else {
+            vec![k]
+        };
+        self.moving = Some(Moving { kind: k, grab: self.slot(k).cursor, group });
+    }
+
+    /// Déplace la fenêtre saisie (et son groupe) en suivant la souris, avec aimantation.
+    fn move_windows(&mut self, x: f64, y: f64) {
+        let Some(m) = &self.moving else { return };
+        let k = m.kind;
+        if self.slot(k).pos.is_none() {
+            return;
+        }
+        let mut dx = (x - m.grab.0).round() as i32;
+        let mut dy = (y - m.grab.1).round() as i32;
+        if dx == 0 && dy == 0 {
+            return;
+        }
+        let rects = self.rects();
+        if !self.mods.shift_key() {
+            let moving: Vec<R> = m.group.iter().filter_map(|&g| rects[g as usize]).map(|r| R::new(r.x + dx, r.y + dy, r.w, r.h)).collect();
+            let targets: Vec<R> = KINDS.iter().filter(|g| !m.group.contains(g)).filter_map(|&g| rects[g as usize]).collect();
+            let screens: Vec<R> = self
+                .slot(k)
+                .win
+                .as_ref()
+                .map(|w| w.window.available_monitors().map(|mo| R::new(mo.position().x, mo.position().y, mo.size().width as i32, mo.size().height as i32)).collect())
+                .unwrap_or_default();
+            let zoom = self.slot(k).win.as_ref().map(|w| w.zoom as i32 / if self.double_for(k) { 2 } else { 1 }).unwrap_or(1);
+            let (sx, sy) = layout::snap(&moving, &targets, &screens, SNAP * zoom.max(1));
+            dx += sx;
+            dy += sy;
+        }
+        let group = m.group.clone();
+        for g in group {
+            if let Some((gx, gy)) = self.slot(g).pos {
+                self.set_pos(g, gx + dx, gy + dy);
+            }
+        }
+    }
+
+    // --- Commandes ------------------------------------------------------------------------------------
 
     fn command(&mut self, cmd: Command, event_loop: &ActiveEventLoop) {
         use Command::*;
@@ -250,17 +676,17 @@ impl App {
                 self.player.set_volume(v);
                 self.main_ui.marquee.flash(&format!("VOLUME: {}%", (v as u32 * 100 + 127) / 255));
             }
-            OpenFiles | AddFiles => {
+            OpenFiles | PlAddFiles => {
                 let files = dialogs::pick_files(self.player.settings.last_dir.as_deref());
                 if let Some(d) = files.first().and_then(|f| f.parent()) {
                     self.player.settings.last_dir = Some(d.to_path_buf());
                 }
                 self.player.open(&files, cmd == OpenFiles);
             }
-            OpenFolder => {
+            OpenFolder | PlAddFolder => {
                 if let Some(dir) = dialogs::pick_folder(self.player.settings.last_dir.as_deref()) {
                     self.player.settings.last_dir = Some(dir.clone());
-                    self.player.open(&[dir], true);
+                    self.player.open(&[dir], cmd == OpenFolder);
                 }
             }
             LoadSkin => {
@@ -282,23 +708,21 @@ impl App {
             ToggleTimeMode => self.player.settings.time_remaining = !self.player.settings.time_remaining,
             ToggleDoubleSize => {
                 self.player.settings.double_size = !self.player.settings.double_size;
-                let d = self.player.settings.double_size;
-                if let Some(w) = self.main.as_mut() {
-                    w.update_zoom(d);
-                }
+                self.relayout(Kind::Main);
+                self.relayout(Kind::Eq);
             }
             ToggleAlwaysOnTop => {
                 self.player.settings.always_on_top = !self.player.settings.always_on_top;
-                if let Some(w) = &self.main {
-                    w.window.set_window_level(if self.player.settings.always_on_top { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal });
+                let level = if self.player.settings.always_on_top { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal };
+                for s in &self.slots {
+                    if let Some(w) = &s.win {
+                        w.window.set_window_level(level);
+                    }
                 }
             }
             ToggleShade => {
-                self.main_ui.shade = !self.main_ui.shade;
-                let size = self.main_ui.size();
-                if let Some(w) = self.main.as_mut() {
-                    w.set_skin_size(size);
-                }
+                let k = self.focused.filter(|&k| k != Kind::Gen).unwrap_or(Kind::Main);
+                self.toggle_shade(k);
             }
             Vis(mode) => {
                 self.player.settings.vis.mode = mode;
@@ -306,7 +730,11 @@ impl App {
                     self.main_ui.vis.reset();
                 }
             }
-            FileInfo => self.show_file_info(),
+            FileInfo => {
+                if let Some(i) = self.player.playlist.current() {
+                    self.show_file_info(i);
+                }
+            }
             About => {
                 let text = t("about.text").replace("{version}", env!("CARGO_PKG_VERSION"));
                 dialogs::message("Alpagamp", &text);
@@ -316,22 +744,212 @@ impl App {
                 event_loop.exit();
             }
             Minimize => {
-                if let Some(w) = &self.main {
+                for k in [Kind::Eq, Kind::Playlist, Kind::Gen] {
+                    if let (true, Some(w)) = (self.slot(k).open, &self.slot(k).win) {
+                        w.window.set_visible(false);
+                    }
+                }
+                self.hidden_by_minimize = true;
+                if let Some(w) = &self.slot(Kind::Main).win {
                     w.window.set_minimized(true);
                 }
             }
             Language(l) => {
                 self.player.settings.language = l.map(|l| l.code().to_string());
                 apply_language(&self.player.settings);
+                for k in KINDS {
+                    if let Some(w) = &self.slot(k).win {
+                        w.window.set_title(&self.title_for(k));
+                    }
+                }
+            }
+            ToggleEqWindow => {
+                let open = !self.slot(Kind::Eq).open;
+                self.set_open(Kind::Eq, open, event_loop);
+            }
+            TogglePlaylistWindow => {
+                let open = !self.slot(Kind::Playlist).open;
+                self.set_open(Kind::Playlist, open, event_loop);
+            }
+            JumpToFile => self.open_gen(GenKind::Jump, event_loop),
+            PlAddUrl => self.open_gen(GenKind::AddUrl, event_loop),
+            ToggleEq => {
+                let mut eq = self.player.settings.eq;
+                eq.enabled = !eq.enabled;
+                self.player.set_eq(eq);
+            }
+            ToggleEqAuto => {
+                let mut eq = self.player.settings.eq;
+                eq.auto = !eq.auto;
+                self.player.set_eq(eq);
+                if eq.auto {
+                    self.apply_auto_preset();
+                }
+            }
+            EqPreset(i) => {
+                if let Some(p) = factory_presets().get(i) {
+                    let mut eq = self.player.settings.eq;
+                    eq.apply_preset(p);
+                    self.player.set_eq(eq);
+                }
+            }
+            EqLoadFile => {
+                if let Some(path) = dialogs::pick_eqf() {
+                    match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| read_eqf(&b).map_err(|e| e.to_string())) {
+                        Ok(presets) if !presets.is_empty() => {
+                            let mut eq = self.player.settings.eq;
+                            eq.apply_preset(&presets[0]);
+                            self.player.set_eq(eq);
+                        }
+                        Ok(_) => {}
+                        Err(e) => dialogs::message(t("error.eqf"), &format!("{}\n\n{e}", path.display())),
+                    }
+                }
+            }
+            EqSaveFile => {
+                if let Some(path) = dialogs::save_eqf() {
+                    let eq = self.player.settings.eq;
+                    let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Alpagamp".into());
+                    let _ = std::fs::write(&path, write_eqf(&[Preset { name, preamp: eq.preamp, bands: eq.bands }]));
+                }
+            }
+            EqSaveAuto => {
+                if let Some(name) = self.current_file_name() {
+                    let eq = self.player.settings.eq;
+                    self.auto_presets.retain(|p| p.name != name);
+                    self.auto_presets.push(Preset { name, preamp: eq.preamp, bands: eq.bands });
+                    self.save_auto_presets();
+                }
+            }
+            EqDeleteAuto => {
+                if let Some(name) = self.current_file_name() {
+                    self.auto_presets.retain(|p| p.name != name);
+                    self.save_auto_presets();
+                }
+            }
+            EqReset => {
+                let mut eq = self.player.settings.eq;
+                eq.preamp = CENTER;
+                eq.bands = [CENTER; 10];
+                self.player.set_eq(eq);
+            }
+            PlRemoveSelected => self.edit_playlist(|p| p.remove_selected()),
+            PlCrop => self.edit_playlist(|p| p.crop()),
+            PlRemoveAll | PlNew => self.edit_playlist(|p| p.clear()),
+            PlRemoveMissing => self.edit_playlist(|p| p.remove_missing()),
+            PlRemoveDuplicates => self.edit_playlist(|p| p.remove_duplicates()),
+            PlSelectAll => self.player.playlist.select_all(),
+            PlSelectNone => self.player.playlist.select_none(),
+            PlInvertSelection => self.player.playlist.invert_selection(),
+            PlSort(key) => self.edit_playlist(|p| p.sort(key)),
+            PlReverse => self.edit_playlist(|p| p.reverse()),
+            PlRandomize => self.edit_playlist(|p| p.randomize()),
+            PlSave => {
+                if let Some(path) = dialogs::save_playlist(self.player.settings.last_dir.as_deref()) {
+                    let is_pls = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("pls"));
+                    let text = if is_pls { write_pls(self.player.playlist.entries()) } else { write_m3u(self.player.playlist.entries(), false) };
+                    let _ = std::fs::write(&path, text);
+                }
+            }
+            PlLoad => {
+                if let Some(path) = dialogs::pick_playlist(self.player.settings.last_dir.as_deref()) {
+                    if let Ok(bytes) = std::fs::read(&path) {
+                        let entries = read_playlist_bytes(&bytes, path.parent());
+                        self.edit_playlist(move |p| {
+                            p.clear();
+                            p.extend(entries);
+                        });
+                    }
+                }
+            }
+            PlFileInfo => {
+                let pl = &self.player.playlist;
+                if let Some(i) = pl.cursor().filter(|&c| pl.entries().get(c).is_some_and(|e| e.selected)).or_else(|| pl.selected_indices().first().copied()) {
+                    self.show_file_info(i);
+                }
+            }
+            PlPlaySelected => {
+                let pl = &self.player.playlist;
+                if let Some(i) = pl.cursor().or_else(|| pl.selected_indices().first().copied()) {
+                    self.player.play_index(i);
+                }
+            }
+            PlCursor(d, extend) => {
+                self.player.playlist.move_cursor(d, extend);
+                if let Some(c) = self.player.playlist.cursor() {
+                    self.pl_ui.ensure_visible(c);
+                }
+            }
+            PlMoveSelection(d) => {
+                if self.player.playlist.move_selection(d) {
+                    self.player.playlist_changed();
+                    if let Some(c) = self.player.playlist.cursor() {
+                        self.pl_ui.ensure_visible(c);
+                    }
+                }
             }
         }
-        self.refresh_menus();
+        self.menus_dirty = true;
         self.request_redraw();
     }
 
-    fn show_file_info(&self) {
-        let Some(e) = self.player.playlist.current_entry() else { return };
-        let info = self.player.info.as_ref();
+    fn edit_playlist(&mut self, f: impl FnOnce(&mut alpagamp_core::Playlist)) {
+        f(&mut self.player.playlist);
+        self.player.playlist_changed();
+    }
+
+    fn save_auto_presets(&self) {
+        if let Some(dir) = self.paths.eq_auto.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&self.paths.eq_auto, write_eqf(&self.auto_presets));
+    }
+
+    /// Charge le préréglage automatique du morceau courant, s'il y en a un.
+    fn apply_auto_preset(&mut self) {
+        if !self.player.settings.eq.auto {
+            return;
+        }
+        let Some(name) = self.current_file_name() else { return };
+        if let Some(p) = self.auto_presets.iter().find(|p| p.name == name).cloned() {
+            let mut eq = self.player.settings.eq;
+            eq.apply_preset(&p);
+            self.player.set_eq(eq);
+        }
+    }
+
+    fn open_gen(&mut self, kind: GenKind, event_loop: &ActiveEventLoop) {
+        let mut g = GenWindow::new(kind);
+        if kind == GenKind::Jump {
+            let all: Vec<usize> = (0..self.player.playlist.len()).collect();
+            g.set_results(all);
+            g.take_query_changed();
+            if let Some(c) = self.player.playlist.current() {
+                g.select(c);
+            }
+        }
+        let size = g.size();
+        self.gen_ui = g;
+        let title = self.title_for(Kind::Gen);
+        if let Some(w) = self.slot_mut(Kind::Gen).win.as_mut() {
+            w.set_geometry(size, false);
+            w.window.set_title(&title);
+        }
+        self.set_open(Kind::Gen, true, event_loop);
+    }
+
+    fn show_file_info(&self, i: usize) {
+        let Some(e) = self.player.playlist.entries().get(i) else { return };
+        let probed;
+        let info = if self.player.playing_index() == Some(i) && self.player.info.is_some() {
+            self.player.info.as_ref()
+        } else {
+            probed = match &e.source {
+                Source::File(p) => Decoder::open_file(p).ok().map(|d| d.info),
+                _ => None,
+            };
+            probed.as_ref()
+        };
         let mut lines = Vec::new();
         let mut add = |k: &str, v: Option<String>| {
             if let Some(v) = v.filter(|v| !v.is_empty()) {
@@ -360,47 +978,66 @@ impl App {
         dialogs::message(t("info.title"), &lines.join("\n"));
     }
 
-    // --- Rendu --------------------------------------------------------------------------------------
+    // --- Rendu ----------------------------------------------------------------------------------------
 
-    fn redraw(&mut self) {
-        let clock = self.start.elapsed().as_millis() as u64;
-        let mut view = self.player.main_view(clock);
-        view.active = self.focused;
-        self.main_ui.render(&mut self.fb, &self.skin, &view);
-        if let Some(w) = self.main.as_mut() {
-            w.present(&self.fb);
+    fn time_text(&self) -> String {
+        let st = self.player.engine.status();
+        if st.state == PlayState::Stopped {
+            return String::new();
+        }
+        let dur = st.info.as_ref().and_then(|i| i.duration_ms);
+        match (self.player.settings.time_remaining, dur) {
+            (true, Some(d)) => format!("-{}", format_duration(d.saturating_sub(st.position_ms))),
+            _ => format_duration(st.position_ms),
         }
     }
 
-    /// Déplace la fenêtre principale en suivant la souris, aimantée aux bords de l'écran.
-    fn move_window(&mut self, x: f64, y: f64) {
-        let (Some((gx, gy)), Some(w)) = (self.moving, self.main.as_ref()) else { return };
-        let Ok(pos) = w.window.outer_position() else { return };
-        let mut nx = pos.x + (x - gx).round() as i32;
-        let mut ny = pos.y + (y - gy).round() as i32;
-        if !self.mods.shift_key() {
-            if let Some(m) = w.window.current_monitor() {
-                let (mx, my) = (m.position().x, m.position().y);
-                let (mw, mh) = (m.size().width as i32, m.size().height as i32);
-                let size = w.window.outer_size();
-                let (ww, wh) = (size.width as i32, size.height as i32);
-                let snap = SNAP * w.zoom as i32;
-                if (nx - mx).abs() < snap {
-                    nx = mx;
-                }
-                if (ny - my).abs() < snap {
-                    ny = my;
-                }
-                if (nx + ww - (mx + mw)).abs() < snap {
-                    nx = mx + mw - ww;
-                }
-                if (ny + wh - (my + mh)).abs() < snap {
-                    ny = my + mh - wh;
+    fn redraw(&mut self, k: Kind) {
+        let active = self.focused == Some(k);
+        match k {
+            Kind::Main => {
+                let clock = self.start.elapsed().as_millis() as u64;
+                let mut view = self.player.main_view(clock);
+                view.active = active;
+                view.eq_open = self.slot(Kind::Eq).open;
+                view.pl_open = self.slot(Kind::Playlist).open;
+                let s = &mut self.slots[0];
+                self.main_ui.render(&mut s.fb, &self.skin, &view);
+                if let Some(w) = s.win.as_mut() {
+                    w.present(&s.fb, &[]);
                 }
             }
-        }
-        if nx != pos.x || ny != pos.y {
-            w.window.set_outer_position(PhysicalPosition::new(nx, ny));
+            Kind::Eq => {
+                let st = &self.player.settings;
+                let view = EqView { eq: st.eq, active, volume: st.volume, balance: st.balance };
+                let s = &mut self.slots[1];
+                self.eq_ui.render(&mut s.fb, &self.skin, &view);
+                if let Some(w) = s.win.as_mut() {
+                    w.present(&s.fb, &[]);
+                }
+            }
+            Kind::Playlist => {
+                let time_text = self.time_text();
+                let pl = &self.player.playlist;
+                let view = PlaylistView { entries: pl.entries(), current: pl.current(), active, total: pl.total_time(), selected: pl.selected_time(), time_text };
+                let s = &mut self.slots[2];
+                self.pl_ui.render(&mut s.fb, &self.skin, &view);
+                if let Some(w) = s.win.as_mut() {
+                    w.present(&s.fb, &self.pl_ui.text);
+                }
+            }
+            Kind::Gen => {
+                let (title, prompt, ok, cancel) = match self.gen_ui.kind {
+                    GenKind::Jump => (t("jump.title"), t("jump.prompt"), t("pl.play_item"), t("dialog.close")),
+                    GenKind::AddUrl => (t("url.title"), t("url.prompt"), t("dialog.ok"), t("dialog.cancel")),
+                };
+                let view = GenView { entries: self.player.playlist.entries(), active, title, prompt, ok_label: ok, cancel_label: cancel };
+                let s = &mut self.slots[3];
+                self.gen_ui.render(&mut s.fb, &self.skin, &view);
+                if let Some(w) = s.win.as_mut() {
+                    w.present(&s.fb, &self.gen_ui.text);
+                }
+            }
         }
     }
 
@@ -409,6 +1046,8 @@ impl App {
             return;
         }
         let files = std::mem::take(&mut self.dropped);
+        let onto_playlist = files.iter().all(|(k, _)| *k == Kind::Playlist);
+        let files: Vec<PathBuf> = files.into_iter().map(|(_, p)| p).collect();
         let (skins, media): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|p| {
             matches!(p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("wsz" | "wal" | "zip"))
         });
@@ -416,8 +1055,155 @@ impl App {
             self.load_skin(s);
         }
         if !media.is_empty() {
-            self.player.open(&media, true);
+            // Sur la playlist : ajout ; ailleurs : remplacement et lecture (comme Winamp).
+            self.player.open(&media, !onto_playlist);
         }
+    }
+
+    fn mouse_down(&mut self, k: Kind, event_loop: &ActiveEventLoop) {
+        let Some(w) = &self.slot(k).win else { return };
+        let (cx, cy) = self.slot(k).cursor;
+        let (x, y) = w.to_skin(cx, cy);
+        let mods = self.mods();
+        let now = Instant::now();
+        let double = self.last_click.is_some_and(|(t, lk, lx, ly)| lk == k && now - t < DOUBLE_CLICK && (lx - x).abs() < 3 && (ly - y).abs() < 3);
+        self.last_click = if double { None } else { Some((now, k, x, y)) };
+        let actions = match k {
+            Kind::Main => {
+                let view = self.player.main_view(0);
+                let mut a = if double { self.main_ui.double_click(x, y, mods) } else { Vec::new() };
+                if a.is_empty() {
+                    a = self.main_ui.mouse_down(x, y, mods, &view);
+                }
+                a
+            }
+            Kind::Eq => {
+                let view = EqView { eq: self.player.settings.eq, active: true, volume: self.player.settings.volume, balance: self.player.settings.balance };
+                let mut a = if double { self.eq_ui.double_click(x, y) } else { Vec::new() };
+                if a.is_empty() {
+                    a = self.eq_ui.mouse_down(x, y, mods, &view);
+                }
+                a
+            }
+            Kind::Playlist => {
+                if double {
+                    let a = self.pl_ui.double_click(x, y);
+                    if !a.is_empty() {
+                        for a in a {
+                            self.action(k, a, event_loop);
+                        }
+                        return;
+                    }
+                }
+                self.pl_ui.mouse_down(x, y, mods, self.player.playlist.entries())
+            }
+            Kind::Gen => {
+                let mut a = if double { self.gen_ui.double_click(x, y) } else { Vec::new() };
+                if a.is_empty() {
+                    a = self.gen_ui.mouse_down(x, y);
+                }
+                a
+            }
+        };
+        for a in actions {
+            self.action(k, a, event_loop);
+        }
+    }
+
+    fn mouse_up(&mut self, k: Kind, event_loop: &ActiveEventLoop) {
+        if self.moving.take().is_some() {
+            self.save();
+            return;
+        }
+        let Some(w) = &self.slot(k).win else { return };
+        let (cx, cy) = self.slot(k).cursor;
+        let (x, y) = w.to_skin(cx, cy);
+        let mods = self.mods();
+        let actions = match k {
+            Kind::Main => {
+                let view = self.player.main_view(0);
+                self.main_ui.mouse_up(x, y, mods, &view)
+            }
+            Kind::Eq => {
+                let view = EqView { eq: self.player.settings.eq, active: true, volume: self.player.settings.volume, balance: self.player.settings.balance };
+                self.eq_ui.mouse_up(x, y, mods, &view)
+            }
+            Kind::Playlist => self.pl_ui.mouse_up(x, y, mods),
+            Kind::Gen => self.gen_ui.mouse_up(x, y),
+        };
+        for a in actions {
+            self.action(k, a, event_loop);
+        }
+    }
+
+    fn mouse_move(&mut self, k: Kind, event_loop: &ActiveEventLoop) {
+        let Some(w) = &self.slot(k).win else { return };
+        let (cx, cy) = self.slot(k).cursor;
+        let (x, y) = w.to_skin(cx, cy);
+        let mods = self.mods();
+        let actions = match k {
+            Kind::Main => {
+                let view = self.player.main_view(0);
+                self.main_ui.mouse_move(x, y, mods, &view)
+            }
+            Kind::Eq => {
+                let view = EqView { eq: self.player.settings.eq, active: true, volume: self.player.settings.volume, balance: self.player.settings.balance };
+                self.eq_ui.mouse_move(x, y, mods, &view)
+            }
+            Kind::Playlist => self.pl_ui.mouse_move(x, y, mods),
+            Kind::Gen => {
+                self.gen_ui.mouse_move(x, y);
+                Vec::new()
+            }
+        };
+        for a in actions {
+            self.action(k, a, event_loop);
+        }
+    }
+
+    fn is_dragging(&self) -> bool {
+        self.moving.is_some() || self.main_ui.is_dragging() || self.eq_ui.is_dragging() || self.pl_ui.is_dragging() || self.gen_ui.is_dragging()
+    }
+
+    /// Ouvre les fenêtres au démarrage.
+    fn startup(&mut self, event_loop: &ActiveEventLoop) {
+        // Positions enregistrées hors de tout écran (écran débranché) : on laisse le système placer.
+        if let Some((x, y)) = self.slot(Kind::Main).pos {
+            let on_screen = event_loop.available_monitors().any(|m| {
+                let (mx, my) = (m.position().x, m.position().y);
+                let (mw, mh) = (m.size().width as i32, m.size().height as i32);
+                x + 50 > mx && x < mx + mw - 20 && y + 10 > my && y < my + mh - 20
+            });
+            if !on_screen {
+                for s in &mut self.slots {
+                    s.pos = None;
+                }
+            }
+        }
+        self.create_window(Kind::Main, event_loop);
+        if self.slot(Kind::Main).win.is_none() {
+            event_loop.exit();
+            return;
+        }
+        for k in [Kind::Eq, Kind::Playlist] {
+            if self.slot(k).open {
+                if self.slot(k).pos.is_none() {
+                    let p = self.default_position(k);
+                    self.slot_mut(k).pos = p;
+                }
+                self.create_window(k, event_loop);
+            }
+        }
+        if let Some(w) = &self.slot(Kind::Main).win {
+            w.window.focus_window();
+        }
+        self.refresh_menus();
+        let args = std::mem::take(&mut self.pending_args);
+        if !args.is_empty() {
+            self.dropped = args.into_iter().map(|p| (Kind::Main, p)).collect();
+            self.handle_dropped();
+        }
+        self.request_redraw();
     }
 }
 
@@ -433,117 +1219,128 @@ fn apply_language(s: &Settings) {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.main.is_some() {
-            return;
+        if !self.started {
+            self.started = true;
+            self.startup(event_loop);
         }
-        let s = &self.player.settings;
-        let pos = s.main_window.map(|w| (w.x, w.y));
-        match SkinWindow::new(event_loop, "Alpagamp", self.main_ui.size(), pos, s.always_on_top, s.double_size) {
-            Ok(w) => self.main = Some(w),
-            Err(e) => {
-                log::error!("fenêtre impossible : {e}");
-                event_loop.exit();
-                return;
-            }
-        }
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        {
-            self.menus = Some(crate::menu::Menus::new(&self.player.settings, &self.paths.skins_dir));
-        }
-        let args = std::mem::take(&mut self.pending_args);
-        if !args.is_empty() {
-            self.dropped = args;
-            self.handle_dropped();
-        }
-        self.request_redraw();
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        let Some(k) = self.kind_of(id) else { return };
         match event {
-            WindowEvent::CloseRequested => self.command(Command::Exit, event_loop),
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::CloseRequested => self.action(k, Action::Close, event_loop),
+            WindowEvent::RedrawRequested => self.redraw(k),
             WindowEvent::Focused(f) => {
-                self.focused = f;
+                if f {
+                    self.focused = Some(k);
+                    if k == Kind::Main && self.hidden_by_minimize {
+                        self.hidden_by_minimize = false;
+                        for o in [Kind::Eq, Kind::Playlist, Kind::Gen] {
+                            if let (true, Some(w)) = (self.slot(o).open, &self.slot(o).win) {
+                                w.window.set_visible(true);
+                            }
+                        }
+                    }
+                } else if self.focused == Some(k) {
+                    self.focused = None;
+                }
                 self.request_redraw();
             }
+            WindowEvent::Moved(p) => {
+                // Position réelle (déplacement par le système, ou confirmation du nôtre).
+                if self.moving.is_none() {
+                    self.slot_mut(k).pos = Some((p.x, p.y));
+                }
+            }
             WindowEvent::ScaleFactorChanged { .. } => {
-                let d = self.player.settings.double_size;
-                if let Some(w) = self.main.as_mut() {
-                    w.update_zoom(d);
+                if let Some(w) = self.slot_mut(k).win.as_mut() {
+                    w.rescale();
                 }
             }
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor = (position.x, position.y);
-                if self.moving.is_some() {
-                    self.move_window(position.x, position.y);
+                self.slot_mut(k).cursor = (position.x, position.y);
+                if self.moving.as_ref().is_some_and(|m| m.kind == k) {
+                    self.move_windows(position.x, position.y);
                     return;
                 }
-                if let Some(w) = &self.main {
-                    let (x, y) = w.to_skin(position.x, position.y);
-                    let view = self.player.main_view(0);
-                    let actions = self.main_ui.mouse_move(x, y, self.mods(), &view);
-                    for a in actions {
-                        self.action(a, event_loop);
-                    }
-                    self.request_redraw();
+                self.mouse_move(k, event_loop);
+                if let Some(w) = &self.slot(k).win {
+                    w.window.request_redraw();
                 }
             }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
-                let Some(w) = &self.main else { return };
-                let (x, y) = w.to_skin(self.cursor.0, self.cursor.1);
-                let view = self.player.main_view(0);
-                let mods = self.mods();
-                let actions = match state {
-                    ElementState::Pressed => {
-                        let now = Instant::now();
-                        let double = self.last_click.is_some_and(|(t, lx, ly)| now - t < DOUBLE_CLICK && (lx - x).abs() < 3 && (ly - y).abs() < 3);
-                        self.last_click = Some((now, x, y));
-                        if double {
-                            self.last_click = None;
-                            let mut a = self.main_ui.double_click(x, y, mods);
-                            if a.is_empty() {
-                                a = self.main_ui.mouse_down(x, y, mods, &view);
-                            }
-                            a
-                        } else {
-                            self.main_ui.mouse_down(x, y, mods, &view)
-                        }
-                    }
-                    ElementState::Released => {
-                        if self.moving.take().is_some() {
-                            self.save();
-                        }
-                        self.main_ui.mouse_up(x, y, mods, &view)
-                    }
-                };
-                for a in actions {
-                    self.action(a, event_loop);
+                match state {
+                    ElementState::Pressed => self.mouse_down(k, event_loop),
+                    ElementState::Released => self.mouse_up(k, event_loop),
                 }
                 self.request_redraw();
             }
-            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Right, .. } => self.popup_menu(),
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Right, .. } => {
+                let which = if k == Kind::Playlist && !self.pl_ui.shade {
+                    let (cx, cy) = self.slot(k).cursor;
+                    let (x, y) = self.slot(k).win.as_ref().map(|w| w.to_skin(cx, cy)).unwrap_or((0, 0));
+                    // Clic droit sur une ligne : la sélectionner si elle ne l'est pas, puis menu de la liste.
+                    let row = self.pl_ui.row_at(x, y);
+                    if let Some(i) = row {
+                        if !self.player.playlist.entries()[i].selected {
+                            self.player.playlist.click(i, false, false);
+                        }
+                    }
+                    if row.is_some() || self.pl_ui.in_list(x, y) { Popup::PlContext } else { Popup::Main }
+                } else {
+                    Popup::Main
+                };
+                self.request_redraw();
+                self.popup(which, k);
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let lines = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => (p.y / 20.0) as f32,
                 };
                 if lines.abs() > 0.0 {
-                    let view = self.player.main_view(0);
-                    for a in self.main_ui.wheel(lines, &view) {
-                        self.action(a, event_loop);
+                    match k {
+                        Kind::Main => {
+                            let view = self.player.main_view(0);
+                            for a in self.main_ui.wheel(lines, &view) {
+                                self.action(k, a, event_loop);
+                            }
+                        }
+                        Kind::Playlist => self.pl_ui.wheel(lines),
+                        Kind::Gen => self.gen_ui.wheel(lines),
+                        Kind::Eq => {}
                     }
                     self.request_redraw();
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state == ElementState::Pressed {
-                    if let Some(c) = keys::map(&event, self.mods) {
-                        self.command(c, event_loop);
+                if event.state != ElementState::Pressed {
+                    return;
+                }
+                if k == Kind::Gen {
+                    if let Some(gk) = keys::gen_key(&event, self.mods) {
+                        for a in self.gen_ui.key(gk) {
+                            self.action(Kind::Gen, a, event_loop);
+                        }
+                        if self.gen_ui.take_query_changed() {
+                            let r = self.player.playlist.search(&self.gen_ui.query);
+                            self.gen_ui.set_results(r);
+                        }
+                        self.request_redraw();
                     }
+                    return;
+                }
+                let focus = match k {
+                    Kind::Playlist => Focus::Playlist,
+                    Kind::Eq => Focus::Eq,
+                    _ => Focus::Main,
+                };
+                if let Some(c) = keys::map(&event, self.mods, focus) {
+                    self.command(c, event_loop);
                 }
             }
-            WindowEvent::DroppedFile(p) => self.dropped.push(p),
+            WindowEvent::DroppedFile(p) => self.dropped.push((k, p)),
             _ => {}
         }
     }
@@ -558,21 +1355,53 @@ impl ApplicationHandler for App {
             }
         }
         self.player.tick();
-        let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32();
-        self.last_frame = now;
-        let playing = self.player.state() == PlayState::Playing;
-        if playing {
-            self.player.engine.vis_latest(&mut self.vis_l, &mut self.vis_r);
-            self.main_ui.vis.analyze(&self.vis_l, &self.vis_r);
-        } else {
-            self.main_ui.vis.analyze(&[], &[]);
+        if self.player.take_track_changed().is_some() {
+            self.apply_auto_preset();
+            if let Some(i) = self.player.playlist.current() {
+                self.pl_ui.ensure_visible(i);
+            }
+            self.menus_dirty = true;
         }
-        self.main_ui.vis.advance(dt, &self.player.settings.vis);
-        self.main_ui.marquee.tick(now);
-        self.request_redraw();
-        let next = if playing || self.main_ui.is_dragging() { now + Duration::from_millis(16) } else { now + Duration::from_millis(100) };
-        event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+        // Message de l'égaliseur dans le titre défilant.
+        match &self.eq_ui.status {
+            Some(s) => {
+                self.main_ui.marquee.set_status(s.clone());
+                self.eq_status_shown = true;
+            }
+            None if self.eq_status_shown => {
+                self.main_ui.marquee.clear_status();
+                self.eq_status_shown = false;
+            }
+            None => {}
+        }
+        if self.menus_dirty && !self.is_dragging() {
+            self.menus_dirty = false;
+            self.refresh_menus();
+        }
+        // Une image toutes les 16 ms en lecture (100 ms sinon). `about_to_wait` est aussi appelé après chaque lot
+        // d'événements : redemander un dessin à chaque fois ferait tourner la boucle à vide (et, sous Windows, une
+        // seule fenêtre recevrait ses WM_PAINT).
+        let now = Instant::now();
+        let playing = self.player.state() == PlayState::Playing;
+        let interval = Duration::from_millis(if playing || self.is_dragging() { 16 } else { 100 });
+        if now >= self.next_frame {
+            let dt = (now - self.last_frame).as_secs_f32().min(0.25);
+            self.last_frame = now;
+            if playing {
+                self.player.engine.vis_latest(&mut self.vis_l, &mut self.vis_r);
+                self.main_ui.vis.analyze(&self.vis_l, &self.vis_r);
+            } else {
+                self.main_ui.vis.analyze(&[], &[]);
+            }
+            self.main_ui.vis.advance(dt, &self.player.settings.vis);
+            self.main_ui.marquee.tick(now);
+            self.request_redraw();
+            self.next_frame = now + interval;
+        } else if self.next_frame > now + interval {
+            // Passage de l'attente à la lecture : ne pas attendre la fin d'un long intervalle.
+            self.next_frame = now + interval;
+        }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame));
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
