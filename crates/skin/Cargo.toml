@@ -1,0 +1,15 @@
+[package]
+name = "alpagamp-skin"
+version = "0.1.0"
+description = "Lecture des skins classiques (.wsz) et skin par défaut d'Alpagamp"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zip.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+png.workspace = true

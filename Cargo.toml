@@ -1,0 +1,46 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/skin",
+    "crates/core",
+    "crates/audio",
+    "crates/ui",
+    "app/desktop",
+    "xtask",
+]
+default-members = ["app/desktop"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/Guiwald/alpagamp"
+authors = ["Guiwald"]
+rust-version = "1.88"
+
+[workspace.dependencies]
+alpagamp-skin = { path = "crates/skin" }
+alpagamp-core = { path = "crates/core" }
+alpagamp-audio = { path = "crates/audio" }
+alpagamp-ui = { path = "crates/ui" }
+
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+png = "0.18"
+rustfft = "6"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "symbols"

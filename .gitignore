@@ -1,0 +1,11 @@
+/target
+/dist/*
+!/dist/.gitkeep
+*.wsz
+*.milk
+*.mp3
+*.flac
+*.ogg
+*.m4a
+/scratch
+.DS_Store
