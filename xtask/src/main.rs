@@ -10,6 +10,7 @@ fn main() {
     let res = match cmd {
         "skin-sheets" => skin_sheets(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
         "export-default-skin" => export_default(args.get(1).map(PathBuf::from)),
+        "render-main" => render_main(args.get(1).map(PathBuf::from), args.get(2).map(PathBuf::from)),
         _ => {
             eprintln!(
                 "Commandes :\n  skin-sheets <dossier> [skin.wsz]   écrit chaque planche en PNG (×3)\n  export-default-skin <fichier.wsz>  exporte le skin par défaut"
@@ -38,6 +39,54 @@ fn skin_sheets(out: Option<PathBuf>, wsz: Option<PathBuf>) -> Res {
         write_png(&out.join(format!("{}.png", sheet.file_name().trim_end_matches(".bmp"))), img, 3)?;
     }
     println!("{} planches écrites dans {}", Sheet::ALL.len(), out.display());
+    Ok(())
+}
+
+/// Rend la fenêtre principale (normale et bandeau) avec une lecture fictive, en PNG ×3.
+fn render_main(out: Option<PathBuf>, wsz: Option<PathBuf>) -> Res {
+    use alpagamp_ui::{MainView, MainWindow, Transport};
+    let out = out.ok_or("fichier de sortie manquant")?;
+    let def = Skin::default_skin();
+    let skin = match wsz {
+        Some(p) => Skin::load_wsz("x", &std::fs::read(&p)?, &def)?,
+        None => def,
+    };
+    let view = MainView {
+        transport: Transport::Playing,
+        position_ms: 83_000,
+        duration_ms: Some(296_000),
+        seekable: true,
+        title: "3. Alpagamp - Chanson de test (4:56)".into(),
+        kbps: Some(320),
+        khz: Some(44),
+        stereo: Some(true),
+        volume: 200,
+        balance: -40,
+        eq_open: true,
+        pl_open: false,
+        shuffle: true,
+        active: true,
+        ..Default::default()
+    };
+    let mut w = MainWindow::new();
+    // Signal fictif : quelques sinus pour animer l'analyseur.
+    let n = 576;
+    let sig: Vec<f32> = (0..n)
+        .map(|i| {
+            let t = i as f32 / 44_100.0;
+            0.4 * (t * 110.0 * std::f32::consts::TAU).sin() + 0.2 * (t * 880.0 * std::f32::consts::TAU).sin() + 0.08 * (t * 5000.0 * std::f32::consts::TAU).sin()
+        })
+        .collect();
+    w.vis.analyze(&sig, &sig);
+    w.vis.advance(0.1, &view.vis);
+    let mut fb = Image::new(1, 1, 0);
+    w.render(&mut fb, &skin, &view);
+    write_png(&out, &fb, 3)?;
+    w.shade = true;
+    w.render(&mut fb, &skin, &view);
+    let shade_path = out.with_file_name(format!("{}-shade.png", out.file_stem().unwrap().to_string_lossy()));
+    write_png(&shade_path, &fb, 3)?;
+    println!("{} et {}", out.display(), shade_path.display());
     Ok(())
 }
 

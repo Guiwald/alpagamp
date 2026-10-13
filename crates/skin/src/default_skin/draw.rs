@@ -65,13 +65,7 @@ pub fn vgrad(img: &mut Image, x: i32, y: i32, w: i32, h: i32, top: u32, bottom: 
     }
 }
 
-/// Dégradé horizontal.
-pub fn hgrad(img: &mut Image, x: i32, y: i32, w: i32, h: i32, left: u32, right: u32) {
-    for col in 0..w {
-        let t = if w > 1 { col as f32 / (w - 1) as f32 } else { 0.0 };
-        vline(img, x + col, y, h, mix(left, right, t));
-    }
-}
+
 
 /// Métal brossé : dégradé vertical + stries horizontales discrètes.
 pub fn brushed(img: &mut Image, x: i32, y: i32, w: i32, h: i32, top: u32, bottom: u32, seed: u32, amount: f32) {

@@ -7,3 +7,5 @@ publish = false
 [dependencies]
 alpagamp-skin.workspace = true
 png.workspace = true
+alpagamp-ui.workspace = true
+alpagamp-core.workspace = true
