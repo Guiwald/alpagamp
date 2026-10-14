@@ -20,8 +20,9 @@ aussi là où la compilation à la volée est interdite (iOS), et une interface 
    - `memory` ;
    - `alp_api() -> i32` : la version de l'API (1) ;
    - `alp_info() -> i32` : adresse d'un texte JSON (UTF-8) terminé par un octet nul : `name`, `kind` (`vis`,
-     `dsp` ou `general`), `author`, `version`, `description`, et `options` (liste de
-     `{ "id", "label", "values": [{ "value", "label" }], "default" }`). Chaque texte peut être une chaîne ou un
+     `dsp` ou `general`), `author`, `version`, `description`, `options` (liste de
+     `{ "id", "label", "values": [{ "value", "label" }], "default" }`) et `remember` (facultatif, `false` : le
+     plugin n'est pas réactivé au démarrage suivant, comme la minuterie). Chaque texte peut être une chaîne ou un
      objet par langue (`{ "en": …, "fr": …, "es": …, "de": …, "it": …, "ca": …, "ga": … }`, repli sur `en`) ;
    - `alp_alloc(octets: i32) -> i32` : réserve de la mémoire où l'hôte écrit ses données (l'hôte la réutilise) ;
    - facultatif : `alp_init()`, puis `alp_option(rang: i32, valeur: i32)` pour chaque option (rang dans

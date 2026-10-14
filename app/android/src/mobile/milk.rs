@@ -50,6 +50,30 @@ pub(super) struct MobileMilk {
     /// Toucher en cours sur la visualisation : (id, départ, instant, appui long déjà traité).
     pub touch: Option<(u64, (f64, f64), Instant, bool)>,
     last_tap: Option<Instant>,
+    /// Visualisation de plugin : dernière image, sa taille, son calque GPU.
+    plugin_px: Vec<u32>,
+    plugin_size: (u32, u32),
+    plugin_layer: Option<Layer>,
+}
+
+impl MobileMilk {
+    /// Agrandit l'image de la visualisation de plugin sur tout l'écran (gros pixels).
+    pub(super) fn blit_plugin(&self, buf: &mut [u32], w: u32, h: u32) {
+        let (pw, ph) = self.plugin_size;
+        if pw == 0 || ph == 0 || self.plugin_px.len() < (pw * ph) as usize {
+            buf.fill(0);
+            return;
+        }
+        let xmap: Vec<usize> = (0..w).map(|x| (x as u64 * pw as u64 / w.max(1) as u64) as usize).collect();
+        for y in 0..h as usize {
+            let sy = (y as u64 * ph as u64 / h.max(1) as u64) as usize;
+            let src = &self.plugin_px[sy * pw as usize..(sy + 1) * pw as usize];
+            let dst = &mut buf[y * w as usize..(y + 1) * w as usize];
+            for (d, &sx) in dst.iter_mut().zip(&xmap) {
+                *d = src[sx];
+            }
+        }
+    }
 }
 
 impl Mobile {
@@ -88,8 +112,17 @@ impl Mobile {
         Presenter::new(g, surface, size.width, size.height, true)
     }
 
+    /// MilkDrop demande le GPU ; une visualisation de plugin marche aussi sans.
     pub(super) fn milk_available(&self) -> bool {
-        matches!(self.screen, Some(Screen::Gpu(_)))
+        matches!(self.screen, Some(Screen::Gpu(_))) || self.player.plugins.vis_running()
+    }
+
+    /// Calcule une image de la visualisation de plugin pour un écran `w × h`.
+    pub(super) fn plugin_vis_frame(&mut self, w: u32, h: u32) -> bool {
+        let (pw, ph) = alpagamp_plugins::vis_size(w, h);
+        let ok = self.player.plugins.vis_frame(pw, ph, &self.player.engine, &mut self.milk.plugin_px);
+        self.milk.plugin_size = if ok { (pw, ph) } else { (0, 0) };
+        ok
     }
 
     /// Entre en visualisation plein écran (en créant le moteur au premier besoin).
@@ -98,7 +131,7 @@ impl Mobile {
             self.main_ui.marquee.flash(t("milk.no_gpu"));
             return;
         }
-        if self.milk.engine.is_none() {
+        if self.milk.engine.is_none() && matches!(self.screen, Some(Screen::Gpu(_))) {
             let Some(g) = self.milk.gpu.clone() else { return };
             let presets = PresetList::scan(&self.data.join("presets"));
             match MilkDrop::new(&g, 256, 256, self.player.engine.output_rate(), presets) {
@@ -120,9 +153,15 @@ impl Mobile {
         self.close_overlay();
         self.milk.on = true;
         self.milk.hint_until = Some(Instant::now() + std::time::Duration::from_secs(5));
-        if let Some(md) = self.milk.engine.as_mut() {
-            let name = md.current().map(|p| p.name.clone()).unwrap_or_default();
-            md.show_message(name);
+        let name = self.milk_name();
+        self.milk_message(name);
+    }
+
+    /// Nom de ce qui est affiché : visualisation de plugin ou preset MilkDrop.
+    fn milk_name(&self) -> String {
+        match self.player.plugins.vis_name() {
+            Some(n) => n.to_string(),
+            None => self.milk.engine.as_ref().and_then(|m| m.current()).map(|p| p.name.clone()).unwrap_or_default(),
         }
     }
 
@@ -169,6 +208,9 @@ impl Mobile {
         let w = self.layout.w.max(1) as f64;
         if dx.abs() > w * SWIPE && dx.abs() > dy.abs() {
             self.milk.last_tap = None;
+            if self.player.plugins.vis_running() {
+                return;
+            }
             if let Some(md) = self.milk.engine.as_mut() {
                 if dx < 0.0 { md.next(false) } else { md.previous(false) }
             }
@@ -184,7 +226,7 @@ impl Mobile {
             return;
         }
         self.milk.last_tap = Some(now);
-        let name = self.milk.engine.as_ref().and_then(|m| m.current()).map(|p| p.name.clone()).unwrap_or_default();
+        let name = self.milk_name();
         self.milk_message(name);
         self.milk.hint_until = Some(now + std::time::Duration::from_secs(4));
     }
@@ -204,6 +246,9 @@ impl Mobile {
     // --- Menus et commandes ----------------------------------------------------------------------
 
     pub(super) fn milk_menu(&self) -> Vec<MenuItem> {
+        if let Some(v) = self.plugin_vis_menu() {
+            return v;
+        }
         let s = &self.player.settings.milkdrop;
         let mut auto = vec![MenuItem::check("milk_auto_0", t("milk.never"), s.auto_secs == 0)];
         auto.extend([10u32, 15, 20, 30, 45, 60, 120].iter().map(|n| MenuItem::check(&format!("milk_auto_{n}"), &format!("{n} s"), s.auto_secs == *n)));
@@ -360,7 +405,8 @@ impl Mobile {
         let Some(g) = self.milk.gpu.clone() else { return };
         let (w, h) = (self.layout.w, self.layout.h);
         let overlay_text = self.render_windows();
-        let milk_on = self.milk.on && self.milk.engine.is_some();
+        let plugin = self.milk.on && self.player.plugins.vis_running();
+        let milk_on = self.milk.on && (self.milk.engine.is_some() || plugin);
         // Les fenêtres (ou la surimpression seule) dans un tampon CPU, puis dans un calque.
         let show_ui = !milk_on || self.overlay.is_some();
         if show_ui {
@@ -377,16 +423,29 @@ impl Mobile {
         }
         // Visualisation.
         let mut enc = g.device.create_command_encoder(&Default::default());
+        let plugin_ok = plugin && self.plugin_vis_frame(w, h);
+        if plugin_ok {
+            let (pw, ph) = self.milk.plugin_size;
+            let layer = match self.milk.plugin_layer.take() {
+                Some(l) if l.size == (pw, ph) => l,
+                _ => Layer::new(&g, pw, ph, false),
+            };
+            let layer = self.milk.plugin_layer.insert(layer);
+            layer.upload_argb(&g, pw, ph, &self.milk.plugin_px);
+        }
         if milk_on {
             self.milk.pcm.clear();
             self.player.engine.vis_since(&mut self.milk.pcm_cursor, &mut self.milk.pcm);
-            let md = self.milk.engine.as_mut().expect("moteur");
-            md.feed(&self.milk.pcm);
-            let (rw, rh) = render_size(w, h, MAX_RENDER);
-            md.resize(&g, rw, rh);
-            md.render(&mut enc);
+            if !plugin {
+                if let Some(md) = self.milk.engine.as_mut() {
+                    md.feed(&self.milk.pcm);
+                    let (rw, rh) = render_size(w, h, MAX_RENDER);
+                    md.resize(&g, rw, rh);
+                    md.render(&mut enc);
+                }
+            }
             // Message (nom du preset…) en haut, sous la barre d'état ; aide en bas.
-            let msg = md.message().map(str::to_string);
+            let msg = self.milk.engine.as_ref().and_then(|md| md.message()).map(str::to_string);
             self.milk.note = match msg {
                 Some(m) => match self.milk.note.take() {
                     Some((k, l)) if k == m => Some((k, l)),
@@ -404,7 +463,7 @@ impl Mobile {
                     Some((text, l))
                 }
             };
-            if let Some(md) = self.milk.engine.as_ref().and_then(|m| m.current()) {
+            if let Some(md) = self.milk.engine.as_ref().and_then(|m| m.current()).filter(|_| !plugin) {
                 let key = md.key();
                 if self.player.settings.milkdrop.last_preset.as_deref() != Some(key.as_str()) {
                     self.player.settings.milkdrop.last_preset = Some(key);
@@ -416,7 +475,11 @@ impl Mobile {
         let full = Rect::new(0.0, 0.0, w as f32, h as f32);
         let mut draws = Vec::new();
         if milk_on {
-            if let Some(md) = self.milk.engine.as_ref() {
+            if plugin {
+                if let (true, Some(l)) = (plugin_ok, &self.milk.plugin_layer) {
+                    draws.push(Draw { layer: l, dst: full, blend: false });
+                }
+            } else if let Some(md) = self.milk.engine.as_ref() {
                 draws.push(Draw { layer: md.layer(), dst: full, blend: false });
             }
             if let Some((_, l)) = &self.milk.note {

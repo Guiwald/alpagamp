@@ -32,6 +32,16 @@ pub fn pick_skin() -> Option<PathBuf> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn pick_plugin() -> Option<PathBuf> {
+    rfd::FileDialog::new().add_filter(t("plugins.filter"), &["wasm"]).pick_file()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn pick_plugin() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn pick_playlist(dir: Option<&Path>) -> Option<PathBuf> {
     let mut d = rfd::FileDialog::new().add_filter(t("dialog.playlists"), &["m3u", "m3u8", "pls"]);
     if let Some(dir) = dir {

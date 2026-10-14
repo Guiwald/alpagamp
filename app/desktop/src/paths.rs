@@ -12,6 +12,8 @@ pub struct Paths {
     pub bookmarks: PathBuf,
     /// Presets de visualisation : le pack téléchargé et ceux que l'on y dépose.
     pub presets_dir: PathBuf,
+    /// Plugins WebAssembly de l'utilisateur.
+    pub plugins_dir: PathBuf,
 }
 
 impl Paths {
@@ -26,6 +28,7 @@ impl Paths {
             eq_auto: config_dir.join("eq-auto.eqf"),
             bookmarks: config_dir.join("bookmarks.m3u8"),
             presets_dir: config_dir.join("presets"),
+            plugins_dir: config_dir.join("plugins"),
             config_dir,
         }
     }

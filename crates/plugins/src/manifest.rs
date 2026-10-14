@@ -101,6 +101,13 @@ pub struct Manifest {
     pub description: Text,
     #[serde(default)]
     pub options: Vec<OptionDef>,
+    /// `false` : le plugin n'est pas réactivé au prochain démarrage (minuterie…).
+    #[serde(default = "yes")]
+    pub remember: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Manifest {

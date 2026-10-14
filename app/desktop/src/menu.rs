@@ -8,6 +8,7 @@ use alpagamp_core::eq::factory_presets;
 use alpagamp_core::i18n::{Lang, t};
 use alpagamp_core::playlist::SortKey;
 use alpagamp_core::settings::{AnalyzerStyle, ReplayGainMode, ScopeStyle, VisMode};
+use alpagamp_plugins::Kind;
 use muda::{CheckMenuItem, ContextMenu, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
@@ -30,6 +31,20 @@ pub struct MenuState<'a> {
     pub zoom: u32,
     /// Le pack de presets est installé (ou en cours d'installation).
     pub pack_installed: bool,
+    /// Plugins disponibles.
+    pub plugins: Vec<PluginMenu>,
+    /// Fichiers de plugins illisibles : (fichier, raison).
+    pub plugins_broken: Vec<(String, String)>,
+}
+
+/// Un plugin dans le menu Plugins.
+pub struct PluginMenu {
+    pub id: String,
+    pub name: String,
+    pub kind: Kind,
+    pub enabled: bool,
+    /// Options : (libellé, [(valeur, libellé)], valeur actuelle).
+    pub options: Vec<(String, Vec<(i32, String)>, i32)>,
 }
 
 pub struct Menus {
@@ -72,6 +87,7 @@ impl Menus {
             let _ = bar.append(&options_submenu(st.settings, st.zoom));
             let _ = bar.append(&skins_submenu(&skins));
             let _ = bar.append(&vis_submenu(st));
+            let _ = bar.append(&plugins_submenu(st));
             bar.init_for_nsapp();
             bar
         };
@@ -197,7 +213,21 @@ impl Menus {
             "milk_pack" => MilkDownloadPack,
             "milk_folder" => MilkOpenFolder,
             "milk_rescan" => MilkRescan,
+            "plg_install" => PluginInstall,
+            "plg_folder" => PluginsFolder,
+            "plg_rescan" => PluginsRescan,
             other => {
+                if let Some(id) = other.strip_prefix("plg_on_") {
+                    return Some(PluginToggle(id.to_string()));
+                }
+                if let Some(id) = other.strip_prefix("plg_about_") {
+                    return Some(PluginAbout(id.to_string()));
+                }
+                if let Some(rest) = other.strip_prefix("plg_opt_") {
+                    let mut it = rest.splitn(3, '_');
+                    let (i, v, id) = (it.next()?.parse().ok()?, it.next()?.parse().ok()?, it.next()?);
+                    return Some(PluginOption(id.to_string(), i, v));
+                }
                 if let Some(code) = other.strip_prefix("lang_") {
                     return Lang::ALL.into_iter().find(|l| l.code() == code).map(|l| Language(Some(l)));
                 }
@@ -494,8 +524,41 @@ fn build_main(st: &MenuState, skins: &[PathBuf]) -> Menu {
     let _ = m.append(&options_submenu(st.settings, st.zoom));
     let _ = m.append(&skins_submenu(skins));
     let _ = m.append(&vis_submenu(st));
+    let _ = m.append(&plugins_submenu(st));
     let _ = m.append(&sep());
     let _ = m.append(&item("exit", "menu.exit"));
+    m
+}
+
+/// Le menu Plugins : chaque plugin (activer, options, à propos), puis installer, dossier, recharger.
+fn plugins_submenu(st: &MenuState) -> Submenu {
+    let m = Submenu::new(t("menu.plugins"), true);
+    for p in &st.plugins {
+        let title = if p.enabled { format!("✓ {}", p.name) } else { p.name.clone() };
+        let sub = Submenu::new(title, true);
+        let label = if p.kind == Kind::Vis { t("plugins.show") } else { t("plugins.enabled") };
+        let _ = sub.append(&CheckMenuItem::with_id(format!("plg_on_{}", p.id), label, true, p.enabled, None));
+        if !p.options.is_empty() {
+            let _ = sub.append(&sep());
+        }
+        for (i, (label, values, cur)) in p.options.iter().enumerate() {
+            let o = Submenu::new(label, true);
+            for (v, vl) in values {
+                let _ = o.append(&CheckMenuItem::with_id(format!("plg_opt_{i}_{v}_{}", p.id), vl, true, cur == v, None));
+            }
+            let _ = sub.append(&o);
+        }
+        let _ = sub.append(&sep());
+        let _ = sub.append(&MenuItem::with_id(format!("plg_about_{}", p.id), t("plugins.about"), true, None));
+        let _ = m.append(&sub);
+    }
+    for (file, _) in &st.plugins_broken {
+        let _ = m.append(&MenuItem::new(format!("⚠ {file} ({})", t("plugins.unreadable")), false, None));
+    }
+    let _ = m.append(&sep());
+    let _ = m.append(&item("plg_install", "plugins.install"));
+    let _ = m.append(&item("plg_folder", "plugins.open_folder"));
+    let _ = m.append(&item("plg_rescan", "plugins.rescan"));
     m
 }
 

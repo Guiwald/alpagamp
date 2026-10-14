@@ -6,6 +6,18 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+### Ajouté
+- Plugins : système de plugins en WebAssembly (API v1, ADR 0020) — chaque plugin tourne dans un bac à sable
+  (wasmi : pas de disque, pas de réseau, mémoire plafonnée, temps de calcul limité) ; un plugin qui plante ou
+  boucle est arrêté, éteint et signalé dans le titre défilant, la musique continue.
+- Plugins : menu **Plugins** (clic droit, barre de menus du Mac, menu du téléphone) — activer, réglages de chaque
+  plugin, À propos, Installer un plugin… (ou glisser un `.wasm` sur Alpagamp), Ouvrir le dossier, Recharger.
+- Plugins : trois plugins livrés — *Barres plein écran* (analyseur de spectre rétro en diodes, couleurs du skin,
+  feu, glace ou arc-en-ciel, dans la fenêtre de visualisation et en plein écran), *Enhancer* (stéréo élargie,
+  basses, clarté, limiteur), *Minuterie de sommeil* (5 min à 1 h 30, fondu, arrêt ou pause, rappels).
+- Plugins : sur téléphone, la visualisation de plugin s'affiche en plein écran, même sans carte graphique.
+- Développement : kit `alpagamp-plugin` et exemples dans `plugin-examples/`, `cargo xtask plugins`.
+
 ## [0.5.0] - 2026-10-14
 
 > Mise en service : Mac (`Alpagamp-0.5.0.dmg`, puce Apple et Intel) — remplacer l'application dans Applications ;

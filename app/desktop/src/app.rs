@@ -3,6 +3,7 @@
 
 mod cursors;
 mod milk;
+mod plugins;
 mod skins;
 
 use std::path::{Path, PathBuf};
@@ -148,6 +149,8 @@ impl App {
         let auto_presets = std::fs::read(&paths.eq_auto).ok().and_then(|b| read_eqf(&b).ok()).unwrap_or_default();
         let bookmarks = std::fs::read(&paths.bookmarks).ok().map(|b| read_playlist_bytes(&b, paths.bookmarks.parent())).unwrap_or_default();
         let mut player = Player::new(settings);
+        player.init_plugins(paths.plugins_dir.clone());
+        player.set_plugin_colors(&skin.vis.0);
         if args.is_empty() {
             player.load_playlist_file(&paths.playlist);
         }
@@ -439,6 +442,8 @@ impl App {
             milk_open: self.slot(Kind::Vis).open,
             zoom: self.zoom(),
             pack_installed: alpagamp_milkdrop::pack::installed(&self.paths.presets_dir) || self.milk.pack.busy(),
+            plugins: self.plugin_menu_items(),
+            plugins_broken: self.player.plugins.broken.clone(),
         }
     }
 
@@ -512,6 +517,7 @@ impl App {
                 self.skin = skin;
                 self.cursors.reset();
                 self.apply_shapes();
+                self.player.set_plugin_colors(&self.skin.vis.0);
                 self.player.settings.skin = Some(stored);
                 self.menus_dirty = true;
             }
@@ -798,7 +804,7 @@ impl App {
             self.request_redraw();
             return;
         }
-        if self.milk_command(&cmd, event_loop) {
+        if self.milk_command(&cmd, event_loop) || self.plugin_command(&cmd, event_loop) {
             self.request_redraw();
             return;
         }
@@ -874,6 +880,7 @@ impl App {
                 self.skin = self.default_skin.clone();
                 self.cursors.reset();
                 self.apply_shapes();
+                self.player.set_plugin_colors(&self.skin.vis.0);
                 self.player.settings.skin = None;
             }
             ToggleShuffle => self.player.toggle_shuffle(),
@@ -1129,6 +1136,8 @@ impl App {
             // Traitées par `milk_command`.
             ToggleMilk | MilkNext(_) | MilkPrevious | MilkToggleShuffle | MilkToggleLock | MilkPresets | MilkFullscreen
             | MilkLeaveFullscreen | MilkAuto(_) | MilkBlend(_) | MilkDownloadPack | MilkOpenFolder | MilkRescan => {}
+            // Traitées par `plugin_command`.
+            PluginToggle(_) | PluginOption(..) | PluginAbout(_) | PluginInstall | PluginsFolder | PluginsRescan => {}
         }
         self.menus_dirty = true;
         self.request_redraw();
@@ -1500,16 +1509,19 @@ impl App {
         milk::MilkState::fullscreen(self)
     }
 
-    fn handle_dropped(&mut self) {
+    fn handle_dropped(&mut self, event_loop: &ActiveEventLoop) {
         if self.dropped.is_empty() {
             return;
         }
         let files = std::mem::take(&mut self.dropped);
         let onto_playlist = files.iter().all(|(k, _)| *k == Kind::Playlist);
         let files: Vec<PathBuf> = files.into_iter().map(|(_, p)| p).collect();
-        let (skins, media): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|p| {
-            matches!(p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("wsz" | "wal" | "zip"))
-        });
+        let ext = |p: &PathBuf| p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
+        let (plugins, files): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|p| ext(p) == "wasm");
+        for p in &plugins {
+            self.install_plugin(p, event_loop);
+        }
+        let (skins, media): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|p| matches!(ext(p).as_str(), "wsz" | "wal" | "zip"));
         if let Some(s) = skins.last() {
             self.load_skin(s);
         }
@@ -1703,7 +1715,7 @@ impl App {
         let args = std::mem::take(&mut self.pending_args);
         if !args.is_empty() {
             self.dropped = args.into_iter().map(|p| (Kind::Main, p)).collect();
-            self.handle_dropped();
+            self.handle_dropped(event_loop);
         }
         self.request_redraw();
     }
@@ -1912,7 +1924,7 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.handle_dropped();
+        self.handle_dropped(event_loop);
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
             let cmds = self.menus.as_ref().map(|m| m.poll()).unwrap_or_default();
@@ -1975,6 +1987,8 @@ impl ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // Les plugins s'arrêtent d'abord (la minuterie rend le volume avant l'enregistrement).
+        self.player.shutdown_plugins();
         self.save();
     }
 }

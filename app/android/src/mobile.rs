@@ -3,6 +3,7 @@
 //! visualisation MilkDrop en plein écran (module `milk`).
 
 mod milk;
+mod plugins;
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -179,6 +180,8 @@ impl Mobile {
             .as_ref()
             .and_then(|p| std::fs::read(p).ok().and_then(|b| Skin::load_wsz("", &b, &default_skin).ok()))
             .unwrap_or_else(|| default_skin.clone());
+        player.init_plugins(data.join("plugins"));
+        player.set_plugin_colors(&skin.vis.0);
         let skins = SkinBrowser::new(data.join("skins"), SkinsWindow::default());
         let eq_open = player.settings.eq_window.map(|w| w.open).unwrap_or(true);
         let pl_open = player.settings.playlist_window.map(|w| w.open).unwrap_or(true);
@@ -407,12 +410,18 @@ impl Mobile {
         let (w, h) = (self.layout.w, self.layout.h);
         let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) else { return };
         let overlay_text = self.render_windows();
+        // Visualisation de plugin en plein écran (sans GPU : agrandie par le processeur).
+        let plugin_vis = self.milk.on && self.player.plugins.vis_running() && self.plugin_vis_frame(w, h);
         let mut screen = self.screen.take();
         if let Some(milk::Screen::Soft(surface)) = screen.as_mut() {
             if surface.resize(nw, nh).is_ok() {
                 if let Ok(mut buf) = surface.buffer_mut() {
-                    buf.fill(0);
-                    self.compose(&mut buf, w, h, &overlay_text, false, 0x00FF_FFFF);
+                    if plugin_vis {
+                        self.milk.blit_plugin(&mut buf, w, h);
+                    } else {
+                        buf.fill(0);
+                    }
+                    self.compose(&mut buf, w, h, &overlay_text, plugin_vis, 0x00FF_FFFF);
                     let _ = buf.present();
                 }
             }
@@ -847,6 +856,7 @@ impl Mobile {
                     ),
                 ],
             ),
+            MenuItem::sub(t("menu.plugins"), self.plugins_menu()),
             if self.spotify.is_connected() { MenuItem::new("spotify_logout", t("lib.logout")) } else { MenuItem::new("spotify_login", t("lib.login")) },
             MenuItem::separator(),
             MenuItem::new("about", t("menu.about")),
@@ -937,7 +947,7 @@ impl Mobile {
 
     fn menu_command(&mut self, kind: MenuKind, id: &str, el: &ActiveEventLoop) {
         let _ = kind;
-        if self.milk_menu_command(id) {
+        if self.milk_menu_command(id) || self.plugin_menu_command(id) {
             return;
         }
         let p = &mut self.player;
@@ -1044,6 +1054,7 @@ impl Mobile {
                 self.overlay = Some(Overlay::Menu(MenuWindow::new("Alpagamp", items, 275, self.overlay_max_h()), MenuKind::Info));
             }
             "exit" => {
+                self.player.shutdown_plugins();
                 self.save();
                 self.player.stop();
                 self.host.finish();
@@ -1097,6 +1108,7 @@ impl Mobile {
             },
             SkinApply::OpenDialog => {}
         }
+        self.player.set_plugin_colors(&self.skin.vis.0);
     }
 
     fn edit(&mut self, f: impl FnOnce(&mut alpagamp_core::Playlist)) {
@@ -1566,6 +1578,10 @@ impl ApplicationHandler for Mobile {
             self.apply_skin(a);
         }
         self.player.tick();
+        // Visualisation de plugin arrêtée (erreur) sans MilkDrop pour prendre le relais : on sort.
+        if self.milk.on && !self.player.plugins.vis_running() && self.milk.engine.is_none() {
+            self.milk_leave();
+        }
         if self.player.take_track_changed().is_some() {
             if let Some(i) = self.player.playlist.current() {
                 self.pl_ui.ensure_visible(i);

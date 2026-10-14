@@ -1,5 +1,7 @@
 //! Le contrôleur de lecture : playlist + moteur audio + réglages, commun au bureau et au téléphone.
 
+mod plugins;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -34,6 +36,8 @@ pub struct Player {
     pub resolver: Option<Box<dyn Fn(&Source) -> Option<Media> + Send>>,
     /// Lecture hors playlist (Spotify Connect) : son étiquette.
     external: Option<String>,
+    /// Plugins WebAssembly (ADR 0020).
+    pub plugins: alpagamp_plugins::Plugins,
 }
 
 impl Player {
@@ -54,6 +58,7 @@ impl Player {
             last_error: None,
             resolver: None,
             external: None,
+            plugins: alpagamp_plugins::Plugins::new(),
         };
         p.apply_volume();
         p.engine.set_eq(p.settings.eq);
@@ -347,6 +352,11 @@ impl Player {
         self.last_error = Some((msg, Instant::now()));
     }
 
+    /// Message affiché quelques secondes dans le titre défilant.
+    pub fn notify(&mut self, msg: String) {
+        self.last_error = Some((msg, Instant::now()));
+    }
+
     /// Prépare (ou annule) l'enchaînement sans blanc vers le morceau suivant.
     pub fn replan(&mut self) {
         if self.playing.is_none() || self.stop_after_current || self.external.is_some() {
@@ -379,6 +389,7 @@ impl Player {
     /// À appeler régulièrement : traite les événements du moteur et le fondu.
     pub fn tick(&mut self) {
         self.scan_metadata();
+        self.tick_plugins();
         if let Some((start, from)) = self.fade {
             let k = start.elapsed().as_secs_f32() / 2.0;
             if k >= 1.0 {

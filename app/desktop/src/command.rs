@@ -124,6 +124,15 @@ pub enum Command {
     MilkRescan,
     /// Navigateur de skins (Alt+S).
     ToggleSkins,
+    // --- Plugins (ADR 0020) ---
+    /// Active ou désactive un plugin (une visualisation : l'affiche).
+    PluginToggle(String),
+    /// Option n° `.1` du plugin `.0` réglée à `.2`.
+    PluginOption(String, usize, i32),
+    PluginAbout(String),
+    PluginInstall,
+    PluginsFolder,
+    PluginsRescan,
 }
 
 /// Les menus surgissants.

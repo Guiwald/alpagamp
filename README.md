@@ -22,13 +22,14 @@ C'est gratuit, sans pub, sans compte à créer, et tout le code est ici, lisible
 6. [Les radios](#les-radios)
 7. [Changer de skin](#changer-de-skin)
 8. [La visualisation (MilkDrop)](#la-visualisation-milkdrop)
-9. [L'égaliseur](#légaliseur)
-10. [Les raccourcis clavier](#les-raccourcis-clavier)
-11. [Sur le téléphone](#sur-le-téléphone)
-12. [Ça ne marche pas ?](#ça-ne-marche-pas-)
-13. [Vie privée](#vie-privée)
-14. [Pour les curieux et les développeurs](#pour-les-curieux-et-les-développeurs)
-15. [English](#english)
+9. [Les plugins](#les-plugins)
+10. [L'égaliseur](#légaliseur)
+11. [Les raccourcis clavier](#les-raccourcis-clavier)
+12. [Sur le téléphone](#sur-le-téléphone)
+13. [Ça ne marche pas ?](#ça-ne-marche-pas-)
+14. [Vie privée](#vie-privée)
+15. [Pour les curieux et les développeurs](#pour-les-curieux-et-les-développeurs)
+16. [English](#english)
 
 ---
 
@@ -54,7 +55,7 @@ Alpagamp, c'est cette expérience, refaite aujourd'hui :
 
 ## Ce qui marche aujourd'hui
 
-La version actuelle est la **0.5** : c'est une préversion. Elle marche, mais il manque encore des choses.
+La version actuelle est la **0.6** : c'est une préversion. Elle marche, mais il manque encore des choses.
 
 | Version | Ce qu'elle apporte | Où on en est |
 |---|---|---|
@@ -62,8 +63,8 @@ La version actuelle est la **0.5** : c'est une préversion. Elle marche, mais il
 | 0.2 | L'égaliseur, la playlist, les fenêtres aimantées, la recherche de morceau | fait |
 | 0.3 | Les radios, le fondu enchaîné, ReplayGain, les signets, la première version Android | fait |
 | 0.4 | Spotify : connexion, Bibliothèque, Spotify Connect | fait |
-| 0.5 | Les visualisations façon MilkDrop (plein écran), le navigateur de skins, la taille des fenêtres | **version actuelle** |
-| 0.6 | Des extensions (plugins) qu'on peut ajouter, avec trois exemples | en cours |
+| 0.5 | Les visualisations façon MilkDrop (plein écran), le navigateur de skins, la taille des fenêtres | fait |
+| 0.6 | Des extensions (plugins) qu'on peut ajouter, avec trois exemples | **version actuelle** |
 | 0.7 | Android complet (musique qui continue écran éteint, commandes sur l'écran verrouillé), 7 langues partout | à venir |
 | 1.0 | Version finale, testée sur Mac, Android et Windows | à venir |
 
@@ -248,6 +249,31 @@ Alpagamp en contient six. Pour en avoir près de **10 000** : clic droit dans la
 propres fichiers `.milk` : **Presets** → **Ouvrir le dossier des presets**, mets-les dedans, puis **Recharger les
 presets**. Le changement automatique (de 10 secondes à 2 minutes) et la durée du fondu se règlent dans le même menu.
 
+## Les plugins
+
+Un **plugin**, c'est un petit programme qu'on ajoute au lecteur pour lui apprendre un truc nouveau. Alpagamp en
+a trois, déjà installés mais éteints au départ. Clic droit → **Plugins** → le nom du plugin :
+
+- **Barres plein écran** — un gros analyseur de spectre rétro, en petites diodes, aux couleurs de ton skin. Coche
+  **Afficher dans la fenêtre de visualisation** : il prend la place des images MilkDrop (décoche pour les
+  retrouver). Il marche aussi en plein écran. Réglages : nombre de barres, couleurs (skin, feu, glace,
+  arc-en-ciel), crêtes, vitesse de chute.
+- **Enhancer** — rend le son plus « gros » : stéréo plus large, basses plus profondes, un peu plus de clarté. Un
+  limiteur empêche que ça sature. Chaque effet se règle (ou s'éteint) dans le menu du plugin.
+- **Minuterie de sommeil** — pour s'endormir en musique : choisis la durée (5 min à 1 h 30), le fondu (le son baisse
+  doucement à la fin) et ce qui se passe à la fin (arrêt ou pause). Le compte à rebours part quand tu l'actives, et
+  le titre défilant te prévient à 5 minutes et à 1 minute de la fin. Elle s'éteint quand tu fermes Alpagamp.
+
+Le ✓ devant un nom veut dire que le plugin est allumé. **À propos…** dit qui l'a fait et ce qu'il fait.
+
+**Ajouter un plugin** : un plugin, c'est un fichier `.wasm`. **Glisse-le sur Alpagamp**, ou **Plugins** →
+**Installer un plugin…** : il est copié dans le dossier des plugins et s'allume tout de suite.
+
+**C'est sans danger ?** Un plugin tourne dans une boîte fermée (un « bac à sable ») : il ne peut ni lire tes
+fichiers, ni aller sur Internet, ni bloquer le lecteur. S'il plante ou tourne en rond, Alpagamp l'arrête, l'éteint
+et te le dit dans le titre défilant ; la musique continue. Installe quand même seulement des plugins de gens à
+qui tu fais confiance.
+
 ## L'égaliseur
 
 - **ON** allume ou éteint l'égaliseur.
@@ -290,6 +316,8 @@ Les trois fenêtres sont empilées et agrandies à la largeur de l'écran ; tout
   options…).
 - **Visualisation plein écran** : menu → **Visualisation plein écran**, ou double-tap sur le petit visualiseur.
   Glisse vers la gauche ou la droite pour changer d'image, double-tap pour revenir, appui long pour son menu.
+- **Plugins** : menu → **Plugins**, comme sur l'ordinateur. *Barres plein écran* s'affiche dans la visualisation
+  plein écran (et marche même sans carte graphique compatible).
 - **Double-tap sur un morceau** de la playlist : le jouer.
 - **Glisser** dans la playlist : la faire défiler.
 - Le bouton **Retour** ferme les menus.
@@ -315,6 +343,10 @@ de jouer sa musique avec un compte gratuit.
 
 **La visualisation ne s'ouvre pas** (« aucune carte graphique compatible ») → ta carte graphique ou son pilote
 ne gère ni Vulkan, ni Metal, ni DirectX 12. Mets à jour le pilote de la carte graphique.
+
+**Un plugin s'est éteint tout seul** (« … arrêté : … » dans le titre défilant) → il a planté ou mis trop de
+temps à répondre ; Alpagamp l'a éteint pour protéger la musique. Tu peux le rallumer dans le menu **Plugins** ;
+si ça recommence, c'est le plugin qui a un problème.
 
 **Téléphone : l'écran s'affiche mal** → menu → **Options** → décoche **Affichage par la carte graphique**, puis
 quitte et relance Alpagamp.
@@ -372,6 +404,7 @@ cargo xtask render-windows apercu.png    # image des fenêtres (avec un .wsz en 
 cargo build --release && cargo xtask bundle-mac target/release/alpagamp           # .app et .dmg (sur macOS)
 cargo build --release && cargo xtask dist-windows target/release/alpagamp.exe     # zip Windows (sur Windows)
 cargo xtask apk                                                                   # APK (ANDROID_HOME, NDK)
+cargo xtask plugins                      # recompile les plugins d'exemple (rustup target add wasm32-unknown-unknown)
 cargo run -p alpagamp-android --bin phone-sim                                     # simulateur de téléphone
 ```
 
@@ -387,6 +420,8 @@ cargo run -p alpagamp-android --bin phone-sim                                   
 | `crates/ui` | Les fenêtres, dessinées au pixel près |
 | `crates/milkdrop` | La visualisation : moteur [lactea](https://github.com/M0Rf30/lactea), GPU (wgpu), presets |
 | `crates/museum` | Le navigateur de skins (Winamp Skin Museum) |
+| `crates/plugins` | Les plugins WebAssembly : bac à sable ([wasmi](https://github.com/wasmi-labs/wasmi)), catalogue, effets audio |
+| `plugin-examples` | Le kit pour écrire un plugin en Rust, et les trois plugins livrés |
 | `crates/player` | Le contrôleur de lecture commun |
 | `app/desktop` | L'appli Mac, Windows et Linux |
 | `app/android` | L'appli Android |
@@ -394,6 +429,33 @@ cargo run -p alpagamp-android --bin phone-sim                                   
 
 Les choix importants sont expliqués dans [`docs/adr`](docs/adr/README.md), le vocabulaire dans
 [`GLOSSARY.md`](GLOSSARY.md), les changements dans [`CHANGELOG.md`](CHANGELOG.md).
+
+### Écrire un plugin
+
+Un plugin est un module WebAssembly qui suit l'[API des plugins](docs/adr/0020-api-des-plugins.md) : trois
+sortes (visualisation, effet audio, plugin général), une description en JSON (nom, réglages, traductions), et
+quelques fonctions que le lecteur appelle. Le plus simple : copier un des exemples de `plugin-examples`, qui
+utilisent le petit kit `alpagamp-plugin` :
+
+```rust
+use alpagamp_plugin::{General, Plugin, host};
+
+struct Bonjour;
+impl Plugin for Bonjour {
+    const INFO: &'static str = r#"{"name": "Bonjour", "kind": "general", "author": "Moi", "version": "1.0"}"#;
+    fn new() -> Self {
+        host::notify("Bonjour !");
+        Bonjour
+    }
+}
+impl General for Bonjour {
+    fn tick(&mut self, _ms: i64) {}
+}
+alpagamp_plugin::general_plugin!(Bonjour);
+```
+
+Puis `cargo build --release --target wasm32-unknown-unknown` et glisser le `.wasm` obtenu sur Alpagamp. N'importe
+quel langage qui produit du WebAssembly (C, Zig, AssemblyScript…) convient, tant qu'il respecte l'API.
 
 ### Compilation automatique et versions
 
@@ -412,7 +474,8 @@ skinnable players of the 2000s: a main window, a 10-band equalizer and a playlis
 windowshade and double-size modes, and classic `.wsz` skins. It plays your local files (MP3, FLAC, OGG, AAC, WAV,
 ALAC…), thousands of internet radios, and your **Spotify** music (Premium account required, including Spotify
 Connect). It shows MilkDrop-style visualizations (window or full screen, ~10,000 presets downloadable in one
-click) and has a built-in skin browser for the Winamp Skin Museum. It runs on **macOS**, **Windows** and **Android**. Free, no ads, no tracking, MIT licensed. Not
+click), has a built-in skin browser for the Winamp Skin Museum, and runs sandboxed WebAssembly plugins (three
+included: a full-screen LED spectrum analyzer, a stereo/bass enhancer and a sleep timer). It runs on **macOS**, **Windows** and **Android**. Free, no ads, no tracking, MIT licensed. Not
 affiliated with Winamp or Nullsoft.
 
 **Install:** download the file for your device from the
@@ -428,7 +491,8 @@ affiliated with Winamp or Nullsoft.
 **Use:** drag files or folders onto the main window (play) or the playlist (add); right-click anywhere for the
 full menu; Alt+L opens the Library (Spotify, radios); drop a `.wsz` skin (from <https://skins.webamp.org>) to
 change the look, or browse skins with Alt+S. Ctrl+Shift+K opens the visualization (double-click for full screen).
-Options › Window size sets ×1/×2/×3. Classic shortcuts: Z X C V B for previous/play/pause/stop/next.
+Options › Window size sets ×1/×2/×3. Right-click › Plugins turns plugins on and sets their options; drop a
+`.wasm` file to install one. Classic shortcuts: Z X C V B for previous/play/pause/stop/next.
 
 **Build from source:** install Rust (<https://rustup.rs>), then `git clone https://github.com/Guiwald/alpagamp`,
 `cd alpagamp`, `cargo run --release` (on Linux, first `sudo apt install libasound2-dev pkg-config`).

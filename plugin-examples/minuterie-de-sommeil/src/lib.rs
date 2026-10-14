@@ -6,16 +6,17 @@ use alpagamp_plugin::{General, Plugin};
 const INFO: &str = r#"{
   "name": {"en": "Sleep Timer", "fr": "Minuterie de sommeil", "es": "Temporizador de apagado", "de": "Schlummer-Timer", "it": "Timer di spegnimento", "ca": "Temporitzador per a dormir", "ga": "Lasc ama codlata"},
   "kind": "general",
+  "remember": false,
   "author": "Alpagamp",
   "version": "1.0.0",
   "description": {
-    "en": "Fall asleep to your music: after the time you choose, the volume fades out and playback stops. Turn it off and on again to restart the countdown.",
-    "fr": "Pour s'endormir en musique : au bout du temps choisi, le son baisse doucement et la lecture s'arrête. Désactive-la puis réactive-la pour relancer le compte à rebours.",
-    "es": "Para dormirte con música: tras el tiempo elegido, el volumen baja poco a poco y la reproducción se detiene. Desactívalo y vuelve a activarlo para reiniciar la cuenta atrás.",
-    "de": "Mit Musik einschlafen: Nach der gewählten Zeit wird es langsam leiser und die Wiedergabe stoppt. Aus- und wieder einschalten startet den Countdown neu.",
-    "it": "Per addormentarsi con la musica: dopo il tempo scelto il volume si abbassa piano e la riproduzione si ferma. Disattivalo e riattivalo per ricominciare il conto alla rovescia.",
-    "ca": "Per a dormir-se amb música: passat el temps triat, el volum baixa a poc a poc i la reproducció s'atura. Desactiva'l i torna'l a activar per a reiniciar el compte arrere.",
-    "ga": "Titim i do chodladh le ceol: tar éis an ama a roghnaíonn tú, ísleoidh an fhuaim go mall agus stopfaidh an seinm. Múch agus las arís é chun an t-áireamh a atosú."
+    "en": "Fall asleep to your music: after the time you choose, the volume fades out and playback stops. Turn it off and on again to restart the countdown. It turns itself off when Alpagamp closes.",
+    "fr": "Pour s'endormir en musique : au bout du temps choisi, le son baisse doucement et la lecture s'arrête. Désactive-la puis réactive-la pour relancer le compte à rebours. Elle s'éteint quand Alpagamp se ferme.",
+    "es": "Para dormirte con música: tras el tiempo elegido, el volumen baja poco a poco y la reproducción se detiene. Desactívalo y vuelve a activarlo para reiniciar la cuenta atrás. Se apaga al cerrar Alpagamp.",
+    "de": "Mit Musik einschlafen: Nach der gewählten Zeit wird es langsam leiser und die Wiedergabe stoppt. Aus- und wieder einschalten startet den Countdown neu. Beim Schließen von Alpagamp schaltet er sich ab.",
+    "it": "Per addormentarsi con la musica: dopo il tempo scelto il volume si abbassa piano e la riproduzione si ferma. Disattivalo e riattivalo per ricominciare il conto alla rovescia. Si spegne quando chiudi Alpagamp.",
+    "ca": "Per a dormir-se amb música: passat el temps triat, el volum baixa a poc a poc i la reproducció s'atura. Desactiva'l i torna'l a activar per a reiniciar el compte arrere. S'apaga quan es tanca Alpagamp.",
+    "ga": "Titim i do chodladh le ceol: tar éis an ama a roghnaíonn tú, ísleoidh an fhuaim go mall agus stopfaidh an seinm. Múch agus las arís é chun an t-áireamh a atosú. Múchtar é nuair a dhúntar Alpagamp."
   },
   "options": [
     {"id": "minutes", "label": {"en": "Stop after", "fr": "Arrêt au bout de", "es": "Parar tras", "de": "Stopp nach", "it": "Ferma dopo", "ca": "Atura després de", "ga": "Stop tar éis"},

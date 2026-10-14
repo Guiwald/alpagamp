@@ -26,13 +26,13 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 | **lactea** | Le moteur MilkDrop en Rust (wgpu) utilisé derrière l'interface `Visualizer` (ADR 0019). |
 | **Preset AVS** | Un fichier `.avs` binaire (v2). |
 | **Preset d'EQ** | 10 bandes + préampli ; fichier `.eqf` ou bibliothèque. |
-| **Plugin** | Un module WebAssembly chargé par le lecteur (ADR 0003). Trois sortes : **visualisation**, **DSP** (effet audio), **général**. |
+| **Plugin** | Un module WebAssembly (`.wasm`) chargé par le lecteur dans un bac à sable (ADR 0003, API : ADR 0020). Trois sortes : **visualisation**, **DSP** (effet audio), **général**. |
 | **Mod** | Terme générique côté utilisateur : skin, preset ou plugin. |
 | **Source** | D'où vient un morceau : fichier local, flux radio (URL), Spotify. |
 | **Entrée de playlist** | Une ligne de la playlist : une référence vers une source + titre et durée connus. |
 | **librespot** | La bibliothèque Rust qui fait du lecteur un client Spotify (ADR 0002). |
 | **Spotify Connect** | Le mécanisme qui permet de choisir, depuis l'appli Spotify, l'appareil qui joue. |
-| **Chaîne audio** | décodeur → préampli/ReplayGain → égaliseur → limiteur → plugin DSP → sortie (volume, balance). |
+| **Chaîne audio** | décodeur → préampli/ReplayGain → égaliseur → limiteur → effets audio des plugins → sortie (volume, balance). |
 | **Trame de visualisation** | 2 canaux × 576 valeurs de spectre + 2 × 576 échantillons de forme d'onde, envoyés aux visualisations. |
 | **Mode fidèle / mode adapté** | Les deux présentations sur téléphone (ADR 0006). |
 | **Bibliothèque** | La fenêtre qui parcourt Spotify (playlists, titres likés, albums, recherche), les radios et les dossiers locaux (ADR 0010). |
@@ -40,3 +40,7 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 | **Navigateur de skins** | La fenêtre (Alt+S) qui cherche et télécharge des skins du Skin Museum (ADR 0012) ; onglets Musée et Mes skins. |
 | **Forme de fenêtre** | Contour non rectangulaire donné par le `region.txt` d'un skin (fenêtre principale, égaliseur). |
 | **Unité de disposition** | Points sur macOS, pixels physiques ailleurs : l'unité des positions du groupe aimanté. |
+| **Plugin livré** | L'un des trois plugins d'exemple intégrés au lecteur (ADR 0013), construits depuis `plugin-examples/`. |
+| **Effet audio** (DSP) | Plugin qui transforme le son, après l'égaliseur, dans le fil de décodage. |
+| **Carburant** (fuel) | Budget de calcul donné à chaque appel d'un plugin ; épuisé, le plugin est arrêté et éteint. |
+| **Visualisation de plugin** | Image calculée par un plugin `vis`, affichée à la place de MilkDrop dans la fenêtre de visualisation. |

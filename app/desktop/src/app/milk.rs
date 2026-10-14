@@ -37,6 +37,9 @@ pub(super) struct MilkState {
     pub items: Vec<(String, String)>,
     /// Position de la fenêtre avant le plein écran.
     restore_pos: Option<(i32, i32)>,
+    /// Visualisation de plugin : pixels de la dernière image et calque GPU.
+    plugin_px: Vec<u32>,
+    plugin_layer: Option<Layer>,
 }
 
 impl MilkState {
@@ -270,21 +273,26 @@ impl App {
         true
     }
 
-    /// Dessine une image de la visualisation : MilkDrop, puis le cadre (ou le message, en plein écran).
+    /// Dessine une image de la visualisation : MilkDrop (ou la visualisation de plugin), puis le cadre (ou le
+    /// message, en plein écran).
     pub(super) fn milk_redraw(&mut self) {
         let active = self.focused == Some(Kind::Vis);
         let status = self.milk_status();
         let Some(g) = self.milk.gpu.clone() else { return };
+        let plugin = self.player.plugins.vis_running();
+        let plugin_name = self.player.plugins.vis_name().map(str::to_string);
         // Échantillons joués depuis l'image précédente.
         self.milk.pcm.clear();
         self.player.engine.vis_since(&mut self.milk.pcm_cursor, &mut self.milk.pcm);
         let slot = &mut self.slots[Kind::Vis as usize];
         let (Some(win), Some(md)) = (slot.win.as_mut(), self.milk.engine.as_mut()) else { return };
-        md.feed(&self.milk.pcm);
+        if !plugin {
+            md.feed(&self.milk.pcm);
+        }
         let (pw, ph) = win.phys_size();
         let (pw, ph) = (pw.max(1) as u32, ph.max(1) as u32);
         let z = win.zoom.max(1);
-        let message = md.message().map(str::to_string);
+        let message = if plugin { None } else { md.message().map(str::to_string) };
         let full = win.fullscreen;
         let (vp, overlay) = if full {
             // Message en haut à gauche, à une taille lisible.
@@ -309,7 +317,8 @@ impl App {
             };
             (Rect::new(0.0, 0.0, pw as f32, ph as f32), layer)
         } else {
-            let view = MilkView { active, title: t("milk.title"), message: message.as_deref(), status: status.as_deref() };
+            let title = plugin_name.as_deref().unwrap_or(t("milk.title"));
+            let view = MilkView { active, title, message: message.as_deref(), status: status.as_deref() };
             let k = self.milk.ui.chrome_key(&view);
             let key: ChromeKey = (k.0, k.1, k.2, k.3, k.4, k.5, k.6, z);
             if self.milk.chrome.as_ref().map(|(ck, _)| ck) != Some(&key) {
@@ -327,10 +336,28 @@ impl App {
             let chrome = self.milk.chrome.as_ref().map(|(_, l)| (Rect::new(0.0, 0.0, l.size.0 as f32, l.size.1 as f32), l));
             (vp, chrome)
         };
-        let (rw, rh) = render_size(vp.w as u32, vp.h as u32, MAX_RENDER);
-        md.resize(&g, rw, rh);
         let Some(presenter) = win.gpu.as_mut() else { return };
         presenter.resize(&g, pw, ph);
+        // Visualisation de plugin : petite image calculée par le plugin, agrandie en gros pixels.
+        if plugin {
+            let (w, h) = alpagamp_plugins::vis_size(vp.w as u32, vp.h as u32);
+            if self.player.plugins.vis_frame(w, h, &self.player.engine, &mut self.milk.plugin_px) {
+                let layer = match self.milk.plugin_layer.take() {
+                    Some(l) if l.size == (w, h) => l,
+                    _ => Layer::new(&g, w, h, false),
+                };
+                let layer = self.milk.plugin_layer.insert(layer);
+                layer.upload_argb(&g, w, h, &self.milk.plugin_px);
+                let mut draws = vec![Draw { layer, dst: vp, blend: false }];
+                if let Some((dst, l)) = overlay {
+                    draws.push(Draw { layer: l, dst, blend: true });
+                }
+                presenter.frame(&g, |_| {}, &draws);
+            }
+            return;
+        }
+        let (rw, rh) = render_size(vp.w as u32, vp.h as u32, MAX_RENDER);
+        md.resize(&g, rw, rh);
         // MilkDrop d'abord (il lui faut `&mut md`), puis la composition qui emprunte son calque.
         let mut enc = g.device.create_command_encoder(&Default::default());
         md.render(&mut enc);

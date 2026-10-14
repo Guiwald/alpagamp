@@ -26,6 +26,24 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
+  plugins:
+    name: Plugins d'exemple (WebAssembly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: plugin-examples
+      - name: Tests des plugins
+        run: cargo test
+        working-directory: plugin-examples
+      - name: Compilation en WebAssembly
+        run: cargo build --release --target wasm32-unknown-unknown
+        working-directory: plugin-examples
+
   desktop:
     name: Compilation (${{ matrix.os }})
     strategy:

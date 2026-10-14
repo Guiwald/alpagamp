@@ -76,6 +76,12 @@ et des versions modifiées de ns-eel2 (Cockos / Nullsoft, licence de type zlib :
 (NS-EEL) v2 — Copyright (C) 2004-2008 Cockos Incorporated, Copyright (C) 1999-2003 Nullsoft, Inc. »). Détails :
 `THIRD_PARTY_NOTICES.md` de lactea.
 
+## Plugins : wasmi — MIT OR Apache-2.0
+
+Les plugins WebAssembly sont exécutés par wasmi 2.0 (https://github.com/wasmi-labs/wasmi, Robin Freyler et
+contributeurs), utilisé tel quel comme dépendance sous la licence MIT (texte ci-dessus, Webamp). Les trois plugins
+livrés (`assets/plugins/*.wasm`) sont construits depuis `plugin-examples/` (licence MIT du projet).
+
 ## Presets de visualisation
 
 Les six presets « Alpagamp - … » sont originaux (licence MIT du projet). Le pack *Cream of the Crop* (sélection
