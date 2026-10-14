@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp-museum"
-version = "0.6.0"
+version = "0.6.1"
 description = "Navigateur de skins : recherche, aperçus et téléchargement depuis le Winamp Skin Museum"
 edition.workspace = true
 license.workspace = true

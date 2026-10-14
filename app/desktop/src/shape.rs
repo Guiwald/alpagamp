@@ -24,13 +24,13 @@ fn oriented(polys: &Polygons) -> Polygons {
 /// Applique `polys` (coordonnées en pixels skin) à la fenêtre ; `None` : rectangulaire.
 /// `phys` : pixels physiques par pixel skin ; `points` : points par pixel skin (macOS) ; `height` : hauteur skin.
 #[allow(unused_variables)]
-pub fn set_shape(window: &Window, polys: Option<&Polygons>, phys: u32, points: u32, size: (u32, u32)) {
+pub fn set_shape(window: &Window, polys: Option<&Polygons>, phys: f64, points: f64, size: (u32, u32)) {
     let polys = polys.map(oriented);
     let polys = polys.as_ref();
     #[cfg(target_os = "windows")]
     windows::set(window, polys, phys);
     #[cfg(target_os = "macos")]
-    mac::set(window, polys, points as f64, ((size.0 * points) as f64, (size.1 * points) as f64));
+    mac::set(window, polys, points, (size.0 as f64 * points, size.1 as f64 * points));
 }
 
 #[cfg(target_os = "windows")]
@@ -41,15 +41,15 @@ mod windows {
     use windows_sys::Win32::Graphics::Gdi::{CreatePolyPolygonRgn, SetWindowRgn, WINDING};
     use winit::window::Window;
 
-    pub fn set(window: &Window, polys: Option<&Polygons>, zoom: u32) {
+    pub fn set(window: &Window, polys: Option<&Polygons>, zoom: f64) {
         let Ok(h) = window.window_handle() else { return };
         let RawWindowHandle::Win32(h) = h.as_raw() else { return };
         let hwnd = h.hwnd.get() as HWND;
-        let z = zoom.max(1) as i32;
+        let z = zoom.max(0.5);
         unsafe {
             match polys {
                 Some(polys) if !polys.is_empty() => {
-                    let points: Vec<POINT> = polys.iter().flatten().map(|&(x, y)| POINT { x: x * z, y: y * z }).collect();
+                    let points: Vec<POINT> = polys.iter().flatten().map(|&(x, y)| POINT { x: (x as f64 * z).round() as i32, y: (y as f64 * z).round() as i32 }).collect();
                     let counts: Vec<i32> = polys.iter().map(|p| p.len() as i32).collect();
                     let rgn = CreatePolyPolygonRgn(points.as_ptr(), counts.as_ptr(), counts.len() as i32, WINDING);
                     if !rgn.is_null() {

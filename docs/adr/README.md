@@ -20,8 +20,9 @@ effacée : sa fiche passe au statut « remplacée par ADR n » et reste là.
 | [0013](0013-plugins-d-exemple.md) | Plugins d'exemple | acceptée |
 | [0014](0014-langues-raccourcis-signature.md) | Langues, raccourcis Mac, mode adapté, signature | acceptée |
 | [0015](0015-youtube-music-et-son-systeme.md) | YouTube Music : son du système en 1.1, intégration complète plus tard | acceptée |
-| [0016](0016-fenetres-et-formes.md) | Fenêtres : groupe aimanté, fenêtres génériques skinnées, formes et curseurs (0.5) | acceptée, révisée |
+| [0016](0016-fenetres-et-formes.md) | Fenêtres : groupe aimanté, fenêtres génériques skinnées, formes et curseurs (0.5) | acceptée, révisée (suite : 0021) |
 | [0017](0017-android-sans-java.md) | Android : NativeActivity sans Java, APK construit sans Gradle | acceptée |
 | [0018](0018-spotify-dans-le-moteur.md) | Spotify dans le moteur ; TLS de librespot (écart pour Android) | acceptée |
 | [0019](0019-lactea.md) | Moteur MilkDrop : lactea retenu après audit, composition GPU | acceptée |
 | [0020](0020-api-des-plugins.md) | API des plugins WebAssembly (v1) : wasmi, carburant, trois sortes, kit et exemples | acceptée |
+| [0021](0021-fenetres-mac-position-reelle-et-demi-crans.md) | Fenêtres sur macOS : position réelle, recollage au démarrage, premier plan, demi-crans (0.6.1) | acceptée |

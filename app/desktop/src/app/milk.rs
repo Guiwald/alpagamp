@@ -15,11 +15,12 @@ use winit::event_loop::ActiveEventLoop;
 use super::{App, Kind};
 use crate::command::Command;
 use crate::dialogs;
-use crate::window::zoomed_argb;
+use crate::window::{scaled, zoomed_argb};
 
 /// Plus grand côté de l'image calculée par MilkDrop (au-delà, elle est agrandie par le GPU).
 const MAX_RENDER: u32 = 1920;
 
+/// Le dernier champ : l'agrandissement en pixels physiques, en demi-crans.
 type ChromeKey = (u32, u32, bool, bool, String, String, String, u32);
 
 #[derive(Default)]
@@ -91,9 +92,9 @@ impl App {
         if self.milk.engine.is_none() {
             let g = self.milk.gpu.clone().expect("gpu");
             let vp = self.milk.ui.viewport();
-            let z = self.slot(Kind::Vis).win.as_ref().map(|w| w.zoom).unwrap_or(1);
+            let z = self.slot(Kind::Vis).win.as_ref().map(|w| w.zoom).unwrap_or(1.0);
             let presets = PresetList::scan(&self.paths.presets_dir);
-            let mut md = MilkDrop::new(&g, (vp.w as u32 * z).max(16), (vp.h as u32 * z).max(16), rate, presets)?;
+            let mut md = MilkDrop::new(&g, scaled(vp.w as u32, z).max(16), scaled(vp.h as u32, z).max(16), rate, presets)?;
             self.apply_milk_settings_to(&mut md);
             if let Some(k) = self.player.settings.milkdrop.last_preset.clone() {
                 md.select_key(&k);
@@ -291,13 +292,13 @@ impl App {
         }
         let (pw, ph) = win.phys_size();
         let (pw, ph) = (pw.max(1) as u32, ph.max(1) as u32);
-        let z = win.zoom.max(1);
+        let z = win.zoom.max(0.5);
         let message = if plugin { None } else { md.message().map(str::to_string) };
         let full = win.fullscreen;
         let (vp, overlay) = if full {
             // Message en haut à gauche, à une taille lisible.
             let text = message.clone().or(status.clone());
-            let nz = (ph / 540).max(1).max(z);
+            let nz = (ph / 540).max(1).max(z.ceil() as u32);
             let layer = match text {
                 Some(m) => {
                     let keep = matches!(&self.milk.note, Some((k, kz, _)) if *k == m && *kz == nz);
@@ -306,7 +307,7 @@ impl App {
                         let mut img = Image::new(w, 19, 0);
                         let mut runs = Vec::new();
                         message_box(&mut Painter::new(&mut img, &self.skin), &mut runs, SkinRect::new(0, 0, w as i32, 19), &m, false);
-                        let (bw, bh, px) = zoomed_argb(&img, nz, &runs);
+                        let (bw, bh, px) = zoomed_argb(&img, nz as f64, &runs);
                         let mut l = Layer::new(&g, bw, bh, false);
                         l.upload_argb(&g, bw, bh, &px);
                         self.milk.note = Some((m, nz, l));
@@ -320,7 +321,7 @@ impl App {
             let title = plugin_name.as_deref().unwrap_or(t("milk.title"));
             let view = MilkView { active, title, message: message.as_deref(), status: status.as_deref() };
             let k = self.milk.ui.chrome_key(&view);
-            let key: ChromeKey = (k.0, k.1, k.2, k.3, k.4, k.5, k.6, z);
+            let key: ChromeKey = (k.0, k.1, k.2, k.3, k.4, k.5, k.6, (z * 2.0).round() as u32);
             if self.milk.chrome.as_ref().map(|(ck, _)| ck) != Some(&key) {
                 self.milk.ui.render(&mut slot.fb, &self.skin, &view);
                 let (bw, bh, px) = zoomed_argb(&slot.fb, z, &self.milk.ui.text);
@@ -332,7 +333,8 @@ impl App {
                 self.milk.chrome = Some((key, l));
             }
             let v = self.milk.ui.viewport();
-            let vp = Rect::new((v.x as u32 * z) as f32, (v.y as u32 * z) as f32, (v.w as u32 * z) as f32, (v.h as u32 * z) as f32);
+            let px = |n: i32| (n.max(0) as f64 * z).round() as f32;
+            let vp = Rect::new(px(v.x), px(v.y), px(v.w), px(v.h));
             let chrome = self.milk.chrome.as_ref().map(|(_, l)| (Rect::new(0.0, 0.0, l.size.0 as f32, l.size.1 as f32), l));
             (vp, chrome)
         };

@@ -6,6 +6,33 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+## [0.6.1] - 2026-10-14
+
+> Mise en service : Mac (`Alpagamp-0.6.1.dmg`) — remplacer l'application dans Applications ; au premier lancement,
+> les fenêtres reprennent leur place collées à la fenêtre principale, à la nouvelle taille automatique (×1,5 sur
+> un écran Retina de portable). Windows — remplacer le dossier. Android (`Alpagamp-0.6.1.apk`) — installer
+> par-dessus la 0.6.0 (rien ne change sur téléphone).
+
+### Ajouté
+- Interface : demi-crans dans Options › Taille des fenêtres — ×1, ×1,5, ×2, ×2,5, ×3 et automatique. Sur un écran
+  Retina, ×1,5 reste net (×3 pixels réels) ; ailleurs, les pixels sont un peu inégaux.
+
+### Modifié
+- Interface : la taille automatique donne ×1,5 sur les écrans Retina de 1 400 à 2 100 points de large (portables
+  Mac), au lieu de ×2. Cmd+D (Ctrl+D) reste la double taille de Winamp : ×1 ↔ ×2, retour à ×1 depuis une autre
+  taille ; la coche « Double taille » et le bouton D s'allument dès que les fenêtres sont agrandies.
+- Docs : ADR 0021 (fenêtres sur macOS : position réelle, recollage au démarrage, premier plan, demi-crans).
+
+### Corrigé
+- Mac : au démarrage, les fenêtres ne se chevauchaient plus ou ne se décollaient plus — chaque fenêtre naissait
+  petite puis grandissait par le haut (macOS garde le coin bas-gauche). Elles naissent maintenant à leur taille,
+  et le groupe est recollé tel qu'il était à la fermeture, même si la taille a changé.
+- Mac : glisser la fenêtre principale tout en haut de l'écran ne disperse plus les autres fenêtres : le groupe
+  s'arrête sous la barre de menus, et suit la position réelle si macOS en corrige une. L'aimantation se fait sur
+  la zone utile de l'écran (sous la barre de menus, au-dessus du Dock).
+- Mac : l'égaliseur, la playlist et les autres fenêtres d'Alpagamp reviennent au premier plan avec la fenêtre
+  qu'on active, au lancement comme au clic.
+
 ## [0.6.0] - 2026-10-14
 
 > Mise en service : Mac (`Alpagamp-0.6.0.dmg`) — remplacer l'application dans Applications. Windows — remplacer

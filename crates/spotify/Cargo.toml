@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp-spotify"
-version = "0.6.0"
+version = "0.6.1"
 description = "Spotify dans Alpagamp : connexion, lecture par librespot dans la chaîne audio, Spotify Connect, bibliothèque"
 edition.workspace = true
 license.workspace = true

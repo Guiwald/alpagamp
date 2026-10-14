@@ -225,7 +225,7 @@ impl Mobile {
 
     fn save(&mut self) {
         let st = &mut self.player.settings;
-        let ws = |open: bool| alpagamp_core::settings::WindowState { x: 0, y: 0, open, shade: false, w: 275, h: 116 };
+        let ws = |open: bool| alpagamp_core::settings::WindowState { x: 0, y: 0, open, shade: false, w: 275, h: 116, lw: 0, lh: 0 };
         st.eq_window = Some(ws(self.eq_open));
         st.playlist_window = Some(ws(self.pl_open));
         st.resume_index = self.player.playlist.current();

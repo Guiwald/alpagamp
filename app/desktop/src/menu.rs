@@ -27,8 +27,8 @@ pub struct MenuState<'a> {
     pub library_open: bool,
     pub spotify_connected: bool,
     pub milk_open: bool,
-    /// Agrandissement effectif des fenêtres.
-    pub zoom: u32,
+    /// Agrandissement effectif des fenêtres, en pour cent.
+    pub scale: u32,
     /// Le pack de presets est installé (ou en cours d'installation).
     pub pack_installed: bool,
     /// Plugins disponibles.
@@ -84,7 +84,7 @@ impl Menus {
             let _ = bar.append(&playback_submenu());
             let _ = bar.append(&bookmarks_submenu(st));
             let _ = bar.append(&windows_submenu(st));
-            let _ = bar.append(&options_submenu(st.settings, st.zoom));
+            let _ = bar.append(&options_submenu(st.settings, st.scale));
             let _ = bar.append(&skins_submenu(&skins));
             let _ = bar.append(&vis_submenu(st));
             let _ = bar.append(&plugins_submenu(st));
@@ -260,7 +260,7 @@ impl Menus {
                     return Some(VisRefresh(v as u8));
                 }
                 if let Some(v) = num("zoom_") {
-                    return Some(WindowZoom(v as u8));
+                    return Some(WindowZoom(v as u32));
                 }
                 if let Some(v) = num("milk_auto_") {
                     return Some(MilkAuto(v as u32));
@@ -332,17 +332,26 @@ fn windows_submenu(st: &MenuState) -> Submenu {
     .expect("menu")
 }
 
-fn zoom_submenu(s: &Settings, zoom: u32) -> Submenu {
+/// « ×1 », « ×1,5 » (virgule ou point selon la langue).
+pub fn scale_label(pct: u32) -> String {
+    let point = matches!(alpagamp_core::i18n::lang(), Lang::En | Lang::Ga);
+    match pct % 100 {
+        0 => format!("×{}", pct / 100),
+        r => format!("×{}{}{}", pct / 100, if point { '.' } else { ',' }, r / 10),
+    }
+}
+
+fn zoom_submenu(s: &Settings, scale: u32) -> Submenu {
     let m = Submenu::new(t("menu.window_size"), true);
-    let auto = s.window_zoom == 0 && !s.double_size;
+    let auto = s.window_scale == 0 && s.window_zoom == 0 && !s.double_size;
     let _ = m.append(&CheckMenuItem::with_id("zoom_0", t("opt.auto"), true, auto, None));
-    for z in 1..=3u32 {
-        let _ = m.append(&CheckMenuItem::with_id(format!("zoom_{z}"), format!("×{z}"), true, !auto && zoom == z, None));
+    for pct in alpagamp_core::settings::SCALES {
+        let _ = m.append(&CheckMenuItem::with_id(format!("zoom_{pct}"), scale_label(pct), true, !auto && scale == pct, None));
     }
     m
 }
 
-fn options_submenu(s: &Settings, zoom: u32) -> Submenu {
+fn options_submenu(s: &Settings, scale: u32) -> Submenu {
     let lang = Submenu::new(t("menu.language"), true);
     let _ = lang.append(&check("lang_system", "menu.system_language", s.language.is_none()));
     let _ = lang.append(&sep());
@@ -355,8 +364,9 @@ fn options_submenu(s: &Settings, zoom: u32) -> Submenu {
         true,
         &[
             &check("on_top", "menu.always_on_top", s.always_on_top),
-            &check("double", "menu.double_size", zoom >= 2),
-            &zoom_submenu(s, zoom),
+            // « Double taille » : allumée dès que les fenêtres sont agrandies (Cmd+D les ramène à ×1).
+            &check("double", "menu.double_size", scale > 100),
+            &zoom_submenu(s, scale),
             &check("remaining", "menu.time_remaining", s.time_remaining),
             &sep(),
             &check("repeat", "menu.repeat", s.repeat),
@@ -521,7 +531,7 @@ fn build_main(st: &MenuState, skins: &[PathBuf]) -> Menu {
     let _ = m.append(&sep());
     let _ = m.append(&playback_submenu());
     let _ = m.append(&bookmarks_submenu(st));
-    let _ = m.append(&options_submenu(st.settings, st.zoom));
+    let _ = m.append(&options_submenu(st.settings, st.scale));
     let _ = m.append(&skins_submenu(skins));
     let _ = m.append(&vis_submenu(st));
     let _ = m.append(&plugins_submenu(st));

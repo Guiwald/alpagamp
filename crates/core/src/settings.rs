@@ -162,6 +162,12 @@ pub struct WindowState {
     /// Taille (playlist seulement), en pixels skin.
     pub w: u32,
     pub h: u32,
+    /// Taille de la fenêtre à l'enregistrement, en unités de disposition (0 : inconnue, réglages d'avant la 0.6.1).
+    /// Sert à retrouver au démarrage quelles fenêtres étaient collées, même si l'agrandissement a changé.
+    #[serde(default)]
+    pub lw: i32,
+    #[serde(default)]
+    pub lh: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -177,8 +183,14 @@ pub struct Settings {
     pub time_remaining: bool,
     /// Ancienne « double taille » (fenêtre principale et égaliseur) ; remplacée par `window_zoom`.
     pub double_size: bool,
-    /// Agrandissement de toutes les fenêtres : 1, 2 ou 3 (0 = selon l'écran).
+    /// Ancien agrandissement entier (0.5 à 0.6.0) : 1, 2 ou 3 (0 = selon l'écran). Relu s'il est seul ; tenu à jour
+    /// (partie entière) pour les anciennes versions.
     pub window_zoom: u8,
+    /// Agrandissement de toutes les fenêtres, en pour cent : 100, 150, 200, 250 ou 300 (0 = selon l'écran).
+    pub window_scale: u16,
+    /// Unités des positions enregistrées : 0 = jusqu'à la 0.6.0 (points sur macOS), 1 = depuis la 0.6.1 (demi-points
+    /// sur macOS). Pixels physiques ailleurs dans les deux cas.
+    pub layout_units: u8,
     pub always_on_top: bool,
     /// Chemin du skin choisi (`None` = skin par défaut).
     pub skin: Option<PathBuf>,
@@ -209,6 +221,8 @@ impl Default for Settings {
             time_remaining: false,
             double_size: false,
             window_zoom: 0,
+            window_scale: 0,
+            layout_units: 0,
             always_on_top: false,
             skin: None,
             eq: EqSettings::default(),
@@ -227,23 +241,51 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Agrandissement des fenêtres ; `auto` : celui que l'écran suggère.
-    pub fn zoom(&self, auto: u32) -> u32 {
-        match self.window_zoom {
-            0 if self.double_size => 2,
-            0 => auto.clamp(1, 3),
-            z => (z as u32).clamp(1, 3),
+    /// Agrandissement des fenêtres, en pour cent (100 à 300 par demi-crans) ; `auto` : celui que l'écran suggère.
+    pub fn scale(&self, auto: u32) -> u32 {
+        let pct = match self.window_scale {
+            0 => match self.window_zoom {
+                0 if self.double_size => 200,
+                0 => auto,
+                z => z as u32 * 100,
+            },
+            p => p as u32,
+        };
+        snap_scale(pct)
+    }
+
+    /// Choisit l'agrandissement (0 = selon l'écran).
+    pub fn set_scale(&mut self, pct: u32) {
+        let pct = if pct == 0 { 0 } else { snap_scale(pct) };
+        self.window_scale = pct as u16;
+        // Les versions 0.5 à 0.6.0 ne lisent que ce champ : la partie entière (×1,5 → ×1).
+        self.window_zoom = (pct / 100) as u8;
+        self.double_size = false;
+    }
+
+    /// Agrandissement suggéré par l'écran : largeur en points, et `half_crisp` quand ×1,5 y tombe sur des pixels
+    /// entiers (écran Retina). ×1 sous 1 400 points ; ×1,5 jusqu'à 2 100 sur Retina (×2 sinon) ; ×2 jusqu'à 2 800 ;
+    /// ×3 au-delà.
+    pub fn auto_scale(screen_width_points: f64, half_crisp: bool) -> u32 {
+        if screen_width_points < 1400.0 {
+            100
+        } else if screen_width_points < 2100.0 && half_crisp {
+            150
+        } else if screen_width_points < 2800.0 {
+            200
+        } else {
+            300
         }
     }
 
-    /// Agrandissement suggéré par la largeur de l'écran (en points) : ×1 sous 1 400, ×2 jusqu'à 2 800, ×3 au-delà.
-    pub fn auto_zoom(screen_width_points: f64) -> u32 {
-        if screen_width_points < 1400.0 {
-            1
-        } else if screen_width_points < 2800.0 {
-            2
-        } else {
-            3
+    /// Agrandissement qu'avaient les versions 0.5 à 0.6.0, pour relire les positions qu'elles ont enregistrées.
+    pub fn legacy_scale(&self, screen_width_points: f64) -> u32 {
+        match self.window_zoom {
+            0 if self.double_size => 200,
+            0 if screen_width_points < 1400.0 => 100,
+            0 if screen_width_points < 2800.0 => 200,
+            0 => 300,
+            z => (z as u32).clamp(1, 3) * 100,
         }
     }
 
@@ -270,6 +312,14 @@ impl Settings {
     }
 }
 
+/// Agrandissements proposés, en pour cent.
+pub const SCALES: [u32; 5] = [100, 150, 200, 250, 300];
+
+/// Ramène un agrandissement au demi-cran le plus proche, entre ×1 et ×3.
+pub fn snap_scale(pct: u32) -> u32 {
+    ((pct.clamp(100, 300) + 25) / 50) * 50
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,7 +332,7 @@ mod tests {
         s.volume = 123;
         s.vis.mode = VisMode::Oscilloscope;
         s.milkdrop.last_preset = Some("Dancer/Comet/x".into());
-        s.milkdrop.window = Some(WindowState { x: 1, y: 2, open: true, shade: false, w: 300, h: 232 });
+        s.milkdrop.window = Some(WindowState { x: 1, y: 2, open: true, shade: false, w: 300, h: 232, lw: 600, lh: 464 });
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, "volume = 7\n").unwrap();
@@ -293,15 +343,39 @@ mod tests {
     }
 
     #[test]
-    fn window_zoom() {
+    fn window_scale() {
         let mut s = Settings::default();
-        assert_eq!(s.zoom(2), 2);
-        assert_eq!(Settings::auto_zoom(1512.0), 2);
-        assert_eq!(Settings::auto_zoom(1280.0), 1);
-        assert_eq!(Settings::auto_zoom(3840.0), 3);
+        // Selon l'écran.
+        assert_eq!(s.scale(150), 150);
+        assert_eq!(Settings::auto_scale(1512.0, true), 150);
+        assert_eq!(Settings::auto_scale(1512.0, false), 200);
+        assert_eq!(Settings::auto_scale(1280.0, true), 100);
+        assert_eq!(Settings::auto_scale(2560.0, true), 200);
+        assert_eq!(Settings::auto_scale(3840.0, false), 300);
+        // Réglages des versions 0.5 à 0.6.0.
         s.double_size = true;
-        assert_eq!(s.zoom(1), 2);
+        assert_eq!(s.scale(100), 200);
         s.window_zoom = 3;
-        assert_eq!(s.zoom(1), 3);
+        assert_eq!(s.scale(100), 300);
+        assert_eq!(s.legacy_scale(1512.0), 300);
+        s.window_zoom = 0;
+        s.double_size = false;
+        assert_eq!(s.legacy_scale(1512.0), 200);
+        // Demi-crans.
+        s.set_scale(150);
+        assert_eq!((s.window_scale, s.window_zoom, s.scale(300)), (150, 1, 150));
+        s.set_scale(260);
+        assert_eq!(s.scale(100), 250);
+        s.set_scale(0);
+        assert_eq!((s.window_zoom, s.scale(200)), (0, 200));
+        assert_eq!(snap_scale(40), 100);
+        assert_eq!(snap_scale(999), 300);
+    }
+
+    #[test]
+    fn reads_window_state_without_layout_size() {
+        let s: Settings = toml::from_str("[main_window]\nx = 10\ny = 20\nopen = true\nshade = false\nw = 275\nh = 116\n").unwrap();
+        let w = s.main_window.unwrap();
+        assert_eq!((w.x, w.lw, w.lh), (10, 0, 0));
     }
 }

@@ -48,3 +48,9 @@ qui n'existent pas sur macOS ni sur Android. Enfin, un skin peut donner une form
 - **Disposition en points sur macOS** : positions et tailles du groupe aimanté sont tenues en points (espace
   global continu entre un écran Retina et un écran externe), en pixels physiques ailleurs. Corrige les fenêtres
   qui se décollaient en passant d'un écran à l'autre.
+
+## Révision (0.6.1, 14/10/2026)
+
+Voir l'ADR 0021 : sur macOS, la position réelle est relue après chaque déplacement (écart au point 1), les fenêtres
+secondaires reviennent au premier plan avec celle qu'on active (équivalent du point 4), le groupe est recollé au
+démarrage, et l'agrandissement passe aux demi-crans (×1,5, ×2,5) avec une disposition en demi-points.

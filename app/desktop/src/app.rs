@@ -37,7 +37,7 @@ use crate::keys::{self, Focus};
 use crate::layout::{self, R};
 use crate::paths::Paths;
 use alpagamp_player::Player;
-use crate::window::{SkinWindow, WindowOptions};
+use crate::window::{POINTS, PT, SkinWindow, WindowOptions, halves_of};
 
 /// Bouton « Ouvrir… » du navigateur de skins (boîte de dialogue native : Mac et Windows).
 const SKINS_OPEN: bool = cfg!(any(target_os = "macos", target_os = "windows"));
@@ -103,8 +103,8 @@ pub struct App {
     gen_ui: GenWindow,
     lib_ui: LibraryWindow,
     milk: milk::MilkState,
-    /// Agrandissement suggéré par l'écran (×1 à ×3).
-    auto_zoom: u32,
+    /// Agrandissement suggéré par l'écran, en pour cent.
+    auto_scale: u32,
     cursors: cursors::Cursors,
     skins: alpagamp_museum::Browser,
     spotify: Arc<Spotify>,
@@ -197,7 +197,7 @@ impl App {
             gen_ui: GenWindow::new(GenKind::Jump),
             lib_ui: LibraryWindow::default(),
             milk,
-            auto_zoom: 1,
+            auto_scale: 100,
             cursors: cursors::Cursors::default(),
             skins,
             spotify,
@@ -254,9 +254,14 @@ impl App {
         }
     }
 
-    /// Agrandissement de toutes les fenêtres (×1 à ×3 ; selon l'écran par défaut).
-    fn zoom(&self) -> u32 {
-        self.player.settings.zoom(self.auto_zoom)
+    /// Agrandissement de toutes les fenêtres, en pour cent (×1 à ×3 par demi-crans ; selon l'écran par défaut).
+    fn scale(&self) -> u32 {
+        self.player.settings.scale(self.auto_scale)
+    }
+
+    /// Le même, en demi-crans (2 = ×1 … 6 = ×3).
+    fn halves(&self) -> u32 {
+        halves_of(self.scale())
     }
 
     fn title_for(&self, k: Kind) -> String {
@@ -323,7 +328,7 @@ impl App {
             skin_size: self.skin_size(k),
             position: self.slot(k).pos,
             on_top: self.player.settings.always_on_top,
-            user_zoom: self.zoom(),
+            halves: self.halves(),
             secondary: k != Kind::Main,
             owner: owner.as_deref(),
             gpu: k == Kind::Vis,
@@ -358,11 +363,11 @@ impl App {
             // La fenêtre générique se met à droite de la visualisation si elle est ouverte.
             if k == Kind::Gen {
                 if let (true, Some((vx, vy)), Some(vw)) = (self.slot(Kind::Vis).visible(), self.slot(Kind::Vis).pos, self.slot(Kind::Vis).win.as_ref()) {
-                    return Some((vx + vw.layout_size().0 + 10, vy));
+                    return Some((vx + vw.layout_size().0 + 10 * PT, vy));
                 }
             }
             let w = mw.layout_size().0;
-            return Some((mx + w + if matches!(k, Kind::Library | Kind::Skins) { 0 } else { 20 }, my));
+            return Some((mx + w + if matches!(k, Kind::Library | Kind::Skins) { 0 } else { 20 * PT }, my));
         }
         Some((mx, y))
     }
@@ -405,7 +410,7 @@ impl App {
     /// les fenêtres collées sous elle ou à sa droite.
     fn relayout(&mut self, k: Kind) {
         let size = self.skin_size(k);
-        let zoom = self.zoom();
+        let zoom = self.halves();
         let Some(w) = self.slot(k).win.as_ref() else { return };
         let (nw, nh) = w.layout_size_for(size, zoom);
         let rects = self.rects();
@@ -440,7 +445,7 @@ impl App {
             library_open: self.slot(Kind::Library).open,
             spotify_connected: self.spotify.is_connected(),
             milk_open: self.slot(Kind::Vis).open,
-            zoom: self.zoom(),
+            scale: self.scale(),
             pack_installed: alpagamp_milkdrop::pack::installed(&self.paths.presets_dir) || self.milk.pack.busy(),
             plugins: self.plugin_menu_items(),
             plugins_broken: self.player.plugins.broken.clone(),
@@ -465,24 +470,37 @@ impl App {
     }
 
     fn save(&mut self) {
-        let state = |s: &Slot, shade: bool, size: (u32, u32)| s.pos.map(|(x, y)| WindowState { x, y, open: s.open, shade, w: size.0, h: size.1 });
+        // Position, et taille réelle (unités de disposition) pour retrouver au démarrage qui est collé à qui.
+        let state = |s: &Slot, shade: bool, size: (u32, u32), prev: Option<WindowState>| {
+            s.pos.map(|(x, y)| {
+                let (lw, lh) = s
+                    .win
+                    .as_ref()
+                    .filter(|w| !w.fullscreen)
+                    .map(|w| w.layout_size())
+                    .or_else(|| prev.filter(|p| p.lw > 0 && p.lh > 0).map(|p| (p.lw, p.lh)))
+                    .unwrap_or((0, 0));
+                WindowState { x, y, open: s.open, shade, w: size.0, h: size.1, lw, lh }
+            })
+        };
         let milk_full = self.milk_fullscreen_now();
         let st = &mut self.player.settings;
-        if let Some(w) = state(&self.slots[0], self.main_ui.shade, (275, 116)) {
+        st.layout_units = 1;
+        if let Some(w) = state(&self.slots[0], self.main_ui.shade, (275, 116), st.main_window) {
             st.main_window = Some(w);
         }
-        if let Some(w) = state(&self.slots[1], self.eq_ui.shade, (275, 116)) {
+        if let Some(w) = state(&self.slots[1], self.eq_ui.shade, (275, 116), st.eq_window) {
             st.eq_window = Some(w);
         } else if let Some(w) = st.eq_window.as_mut() {
             w.open = self.slots[1].open;
         }
-        if let Some(w) = state(&self.slots[2], self.pl_ui.shade, (self.pl_ui.w, self.pl_ui.h)) {
+        if let Some(w) = state(&self.slots[2], self.pl_ui.shade, (self.pl_ui.w, self.pl_ui.h), st.playlist_window) {
             st.playlist_window = Some(w);
         } else if let Some(w) = st.playlist_window.as_mut() {
             w.open = self.slots[2].open;
         }
         if !milk_full {
-            if let Some(w) = state(&self.slots[5], false, self.milk.ui.size()) {
+            if let Some(w) = state(&self.slots[5], false, self.milk.ui.size(), st.milkdrop.window) {
                 st.milkdrop.window = Some(w);
             } else if let Some(w) = st.milkdrop.window.as_mut() {
                 w.open = self.slots[5].open;
@@ -717,7 +735,7 @@ impl App {
             _ => return,
         };
         if let Some(w) = &self.slot(k).win {
-            crate::shape::set_shape(&w.window, self.skin.regions.get(which), w.zoom, w.user_zoom(), w.skin_size);
+            crate::shape::set_shape(&w.window, self.skin.regions.get(which), w.zoom, w.points_per_skin(), w.skin_size);
         }
     }
 
@@ -726,10 +744,9 @@ impl App {
         self.apply_shape(Kind::Eq);
     }
 
-    /// Nouvel agrandissement pour toutes les fenêtres (en gardant le groupe collé).
-    fn set_zoom(&mut self, z: u8) {
-        self.player.settings.window_zoom = z.min(3);
-        self.player.settings.double_size = false;
+    /// Nouvel agrandissement pour toutes les fenêtres, en pour cent (0 = selon l'écran), en gardant le groupe collé.
+    fn set_scale(&mut self, pct: u32) {
+        self.player.settings.set_scale(pct);
         for k in KINDS {
             if k != Kind::Vis || !self.milk_fullscreen_now() {
                 self.relayout(k);
@@ -762,36 +779,152 @@ impl App {
     fn move_windows(&mut self, x: f64, y: f64) {
         let Some(m) = &self.moving else { return };
         let k = m.kind;
-        if self.slot(k).pos.is_none() {
-            return;
-        }
-        // Déplacement de la souris dans la fenêtre, converti en unités de disposition.
+        let Some((kx, ky)) = self.slot(k).pos else { return };
+        // Déplacement de la souris dans la fenêtre (position réelle de la fenêtre), en unités de disposition.
         let unit = self.slot(k).win.as_ref().map(|w| w.unit()).unwrap_or(1.0);
         let mut dx = ((x - m.grab.0) / unit).round() as i32;
         let mut dy = ((y - m.grab.1) / unit).round() as i32;
         if dx == 0 && dy == 0 {
             return;
         }
+        let group = m.group.clone();
         let rects = self.rects();
+        let areas = self.work_areas(k);
+        let moved = |dx: i32, dy: i32| -> Vec<R> { group.iter().filter_map(|&g| rects[g as usize]).map(|r| R::new(r.x + dx, r.y + dy, r.w, r.h)).collect() };
         if !self.mods.shift_key() {
-            let moving: Vec<R> = m.group.iter().filter_map(|&g| rects[g as usize]).map(|r| R::new(r.x + dx, r.y + dy, r.w, r.h)).collect();
-            let targets: Vec<R> = KINDS.iter().filter(|g| !m.group.contains(g)).filter_map(|&g| rects[g as usize]).collect();
-            let screens: Vec<R> = self
-                .slot(k)
-                .win
-                .as_ref()
-                .map(|w| w.window.available_monitors().map(|mo| monitor_rect(&mo)).collect())
-                .unwrap_or_default();
+            let targets: Vec<R> = KINDS.iter().filter(|g| !group.contains(g)).filter_map(|&g| rects[g as usize]).collect();
             // Aimantation à 10 pixels skin.
-            let per_skin_px = self.slot(k).win.as_ref().map(|w| w.layout_size().0 / w.skin_size.0.max(1) as i32).unwrap_or(1);
-            let (sx, sy) = layout::snap(&moving, &targets, &screens, SNAP * per_skin_px.max(1));
+            let per_skin = self.slot(k).win.as_ref().map(|w| w.layout_size().0 as f64 / w.skin_size.0.max(1) as f64).unwrap_or(1.0);
+            let (sx, sy) = layout::snap(&moved(dx, dy), &targets, &areas, (SNAP as f64 * per_skin).round().max(1.0) as i32);
             dx += sx;
             dy += sy;
         }
-        let group = m.group.clone();
+        // macOS ne laisse pas une fenêtre monter sous la barre de menus : le groupe entier s'arrête dessous, au lieu
+        // que la fenêtre saisie bloque et que les autres continuent.
+        if POINTS {
+            dy += layout::clamp_top(&moved(dx, dy), &areas);
+        }
+        // La fenêtre saisie d'abord ; les autres suivent là où elle est vraiment (le système peut avoir corrigé sa
+        // position). Sans ça, le modèle s'écarte de la réalité à chaque mouvement et emporte le groupe.
+        let (nx, ny) = (kx + dx, ky + dy);
+        self.set_pos(k, nx, ny);
+        let (mut ex, mut ey) = (dx, dy);
+        if POINTS {
+            if let Some((ax, ay)) = self.slot(k).win.as_ref().and_then(|w| w.layout_position()) {
+                if (ax - nx).abs() > PT || (ay - ny).abs() > PT {
+                    self.slot_mut(k).pos = Some((ax, ay));
+                    (ex, ey) = (ax - kx, ay - ky);
+                }
+            }
+        }
         for g in group {
-            if let Some((gx, gy)) = self.slot(g).pos {
-                self.set_pos(g, gx + dx, gy + dy);
+            if g != k {
+                if let Some((gx, gy)) = self.slot(g).pos {
+                    self.set_pos(g, gx + ex, gy + ey);
+                }
+            }
+        }
+    }
+
+    /// Zones des écrans pour l'aimantation et la limite haute : sur macOS, la zone utile (sans la barre de menus ni
+    /// le Dock) ; ailleurs, l'écran entier.
+    fn work_areas(&self, k: Kind) -> Vec<R> {
+        #[cfg(target_os = "macos")]
+        {
+            let areas = crate::macos::work_areas();
+            if !areas.is_empty() {
+                return areas;
+            }
+        }
+        self.slot(k).win.as_ref().map(|w| w.window.available_monitors().map(|mo| monitor_rect(&mo)).collect()).unwrap_or_default()
+    }
+
+    /// macOS : reprend la position réelle des fenêtres dont le système a corrigé la place (barre de menus, écran).
+    fn sync_positions(&mut self) {
+        if !POINTS {
+            return;
+        }
+        for k in KINDS {
+            if !self.slot(k).visible() || (k == Kind::Vis && self.milk_fullscreen_now()) {
+                continue;
+            }
+            let (Some(actual), Some((x, y))) = (self.slot(k).win.as_ref().and_then(|w| w.layout_position()), self.slot(k).pos) else { continue };
+            if (actual.0 - x).abs() > PT || (actual.1 - y).abs() > PT {
+                self.slot_mut(k).pos = Some(actual);
+            }
+        }
+    }
+
+    /// Les autres fenêtres d'Alpagamp passent juste derrière celle qui vient d'être activée (macOS ; sous Windows,
+    /// les fenêtres « possédées » le font déjà).
+    fn raise_others(&self, k: Kind) {
+        #[cfg(target_os = "macos")]
+        {
+            if self.hidden_by_minimize || self.milk_fullscreen_now() {
+                return;
+            }
+            let Some(front) = self.slot(k).win.as_ref() else { return };
+            for o in KINDS {
+                if o != k && self.slot(o).visible() {
+                    if let Some(w) = &self.slot(o).win {
+                        crate::macos::order_below(&w.window, &front.window);
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = k;
+    }
+
+    /// Convertit les positions enregistrées par une version d'avant la 0.6.1 (points sur macOS) et renvoie la
+    /// disposition enregistrée (fenêtres principale, égaliseur, playlist et visualisation, en unités de disposition),
+    /// avec la taille d'un pixel skin à l'enregistrement.
+    fn saved_layout(&mut self, width_pts: f64, sf: u32) -> (Vec<Option<R>>, f64) {
+        let st = self.player.settings.clone();
+        let old = st.layout_units == 0;
+        let ws = [st.main_window, st.eq_window, st.playlist_window, None, None, st.milkdrop.window, None];
+        if old {
+            for k in [Kind::Main, Kind::Eq, Kind::Playlist, Kind::Vis] {
+                if let Some((x, y)) = self.slot(k).pos {
+                    self.slot_mut(k).pos = Some((x * PT, y * PT));
+                }
+            }
+        }
+        let legacy = st.legacy_scale(width_pts) as f64 / 100.0 * if POINTS { crate::window::PER_POINT } else { sf as f64 };
+        let main_w = self.skin_size(Kind::Main).0.max(1) as f64;
+        let unit = match st.main_window {
+            Some(w) if !old && w.lw > 0 => w.lw as f64 / main_w,
+            _ => legacy,
+        };
+        let rects = KINDS
+            .iter()
+            .map(|&k| {
+                let w = ws[k as usize]?;
+                let (x, y) = self.slot(k).pos?;
+                let (sw, sh) = self.skin_size(k);
+                let (lw, lh) = if !old && w.lw > 0 && w.lh > 0 { (w.lw, w.lh) } else { ((sw as f64 * unit).round() as i32, (sh as f64 * unit).round() as i32) };
+                Some(R::new(x, y, lw, lh))
+            })
+            .collect();
+        (rects, unit)
+    }
+
+    /// Recolle l'égaliseur, la playlist et la visualisation au groupe de la fenêtre principale (déjà ouverte, à sa
+    /// position réelle), comme ils l'étaient à la fermeture, à la taille d'aujourd'hui.
+    fn redock_saved(&mut self, saved: &[Option<R>], unit: f64) {
+        if saved.first().copied().flatten().is_none() {
+            return;
+        }
+        let Some(mw) = self.slot(Kind::Main).win.as_ref() else { return };
+        let halves = self.halves();
+        let sizes: Vec<Option<(i32, i32)>> = KINDS.iter().map(|&k| saved[k as usize].map(|_| mw.layout_size_for(self.skin_size(k), halves))).collect();
+        let main_w = self.skin_size(Kind::Main).0.max(1) as f64;
+        let new_unit = sizes[0].map(|(w, _)| w as f64 / main_w).unwrap_or(unit);
+        let open: Vec<bool> = KINDS.iter().map(|&k| self.slot(k).open).collect();
+        let out = layout::redock(saved, &open, &sizes, new_unit / unit.max(0.01), 2 * PT, self.slot(Kind::Main).pos);
+        for k in [Kind::Eq, Kind::Playlist, Kind::Vis] {
+            if let Some(r) = out[k as usize] {
+                self.slot_mut(k).pos = Some((r.x, r.y));
             }
         }
     }
@@ -890,11 +1023,12 @@ impl App {
                 self.main_ui.marquee.flash(if self.player.settings.manual_advance { "MANUAL ADVANCE: ON" } else { "MANUAL ADVANCE: OFF" });
             }
             ToggleTimeMode => self.player.settings.time_remaining = !self.player.settings.time_remaining,
+            // « Double taille » de Winamp : ×1 ↔ ×2 ; depuis un autre agrandissement, retour à ×1.
             ToggleDoubleSize => {
-                let z = if self.zoom() >= 2 { 1 } else { 2 };
-                self.set_zoom(z);
+                let pct = if self.scale() > 100 { 100 } else { 200 };
+                self.set_scale(pct);
             }
-            WindowZoom(z) => self.set_zoom(z),
+            WindowZoom(pct) => self.set_scale(pct),
             ToggleAlwaysOnTop => {
                 self.player.settings.always_on_top = !self.player.settings.always_on_top;
                 let level = if self.player.settings.always_on_top { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal };
@@ -1194,7 +1328,7 @@ impl App {
             }
         }
         let title = self.title_for(Kind::Gen);
-        let zoom = self.zoom();
+        let zoom = self.halves();
         if let Some(w) = self.slot_mut(Kind::Gen).win.as_mut() {
             w.set_geometry(size, zoom);
             w.window.set_title(&title);
@@ -1437,6 +1571,8 @@ impl App {
                 let clock = self.start.elapsed().as_millis() as u64;
                 let mut view = self.player.main_view(clock);
                 view.active = active;
+                // Bouton « D » de la barre d'options : allumé quand les fenêtres sont agrandies.
+                view.double_size = self.scale() > 100;
                 view.eq_open = self.slot(Kind::Eq).open;
                 view.pl_open = self.slot(Kind::Playlist).open;
                 let s = &mut self.slots[0];
@@ -1607,6 +1743,7 @@ impl App {
 
     fn mouse_up(&mut self, k: Kind, event_loop: &ActiveEventLoop) {
         if self.moving.take().is_some() {
+            self.sync_positions();
             self.save();
             return;
         }
@@ -1674,27 +1811,44 @@ impl App {
 
     /// Ouvre les fenêtres au démarrage.
     fn startup(&mut self, event_loop: &ActiveEventLoop) {
+        // Agrandissement suggéré par l'écran principal (largeur en points ; ×1,5 seulement s'il tombe sur des pixels
+        // entiers, c'est-à-dire sur un écran Retina).
+        let (width_pts, sf) = event_loop
+            .primary_monitor()
+            .or_else(|| event_loop.available_monitors().next())
+            .map(|m| (m.size().width as f64 / m.scale_factor().max(0.5), m.scale_factor()))
+            .unwrap_or((1440.0, 1.0));
+        let sf = sf.round().max(1.0) as u32;
+        self.auto_scale = Settings::auto_scale(width_pts, sf % 2 == 0);
+        // Disposition à la fermeture, avant tout changement de taille.
+        let (mut saved, unit) = self.saved_layout(width_pts, sf);
         // Positions enregistrées hors de tout écran (écran débranché) : on laisse le système placer.
-        // Agrandissement suggéré par l'écran principal (en points).
-        if let Some(m) = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next()) {
-            self.auto_zoom = Settings::auto_zoom(m.size().width as f64 / m.scale_factor().max(0.5));
-        }
         if let Some((x, y)) = self.slot(Kind::Main).pos {
             let on_screen = event_loop.available_monitors().any(|m| {
                 let r = monitor_rect(&m);
-                x + 50 > r.x && x < r.x + r.w - 20 && y + 10 > r.y && y < r.y + r.h - 20
+                x + 50 * PT > r.x && x < r.x + r.w - 20 * PT && y + 10 * PT > r.y && y < r.y + r.h - 20 * PT
             });
             if !on_screen {
                 for s in &mut self.slots {
                     s.pos = None;
                 }
+                saved = vec![None; KINDS.len()];
+                self.player.settings.milkdrop.window = None;
             }
         }
         self.create_window(Kind::Main, event_loop);
-        if self.slot(Kind::Main).win.is_none() {
+        let Some(main) = self.slot(Kind::Main).win.as_ref() else {
             event_loop.exit();
             return;
+        };
+        // macOS peut avoir refusé la position demandée (sous la barre de menus) : le groupe part de la vraie.
+        if POINTS {
+            if let Some(p) = main.layout_position() {
+                self.slot_mut(Kind::Main).pos = Some(p);
+            }
         }
+        // Les autres fenêtres reprennent leur place contre la principale, comme à la fermeture.
+        self.redock_saved(&saved, unit);
         for k in [Kind::Eq, Kind::Playlist] {
             if self.slot(k).open {
                 if self.slot(k).pos.is_none() {
@@ -1708,9 +1862,11 @@ impl App {
             self.slot_mut(Kind::Vis).open = false;
             self.milk_set_open(true, event_loop);
         }
+        self.sync_positions();
         if let Some(w) = &self.slot(Kind::Main).win {
             w.window.focus_window();
         }
+        self.raise_others(Kind::Main);
         self.refresh_menus();
         let args = std::mem::take(&mut self.pending_args);
         if !args.is_empty() {
@@ -1721,9 +1877,9 @@ impl App {
     }
 }
 
-/// Rectangle d'un écran, en unités de disposition (points sur macOS).
+/// Rectangle d'un écran, en unités de disposition (demi-points sur macOS).
 fn monitor_rect(m: &winit::monitor::MonitorHandle) -> R {
-    let u = if crate::window::POINTS { m.scale_factor().max(0.5) } else { 1.0 };
+    let u = if POINTS { m.scale_factor().max(0.5) / crate::window::PER_POINT } else { 1.0 };
     let (p, s) = (m.position(), m.size());
     R::new((p.x as f64 / u).round() as i32, (p.y as f64 / u).round() as i32, (s.width as f64 / u).round() as i32, (s.height as f64 / u).round() as i32)
 }
@@ -1782,6 +1938,8 @@ impl ApplicationHandler for App {
                             }
                         }
                     }
+                    // Toutes les fenêtres d'Alpagamp reviennent au premier plan avec celle qu'on vient d'activer.
+                    self.raise_others(k);
                 } else if self.focused == Some(k) {
                     self.focused = None;
                 }

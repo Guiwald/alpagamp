@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp-skin"
-version = "0.6.0"
+version = "0.6.1"
 description = "Lecture des skins classiques (.wsz) et skin par défaut d'Alpagamp"
 edition.workspace = true
 license.workspace = true

@@ -1,7 +1,8 @@
 //! Disposition des fenêtres : aimantation aux bords (écran et autres fenêtres), groupe accroché à la fenêtre
 //! principale, décalage des fenêtres collées quand une fenêtre change de taille.
 //!
-//! Tout est en pixels physiques ; les fonctions sont pures pour être testées sans écran.
+//! Tout est en unités de disposition (demi-points sur macOS, pixels physiques ailleurs) ; les fonctions sont pures
+//! pour être testées sans écran.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct R {
@@ -133,6 +134,111 @@ pub fn resize(rects: &[Option<R>], k: usize, new_w: i32, new_h: i32) -> Vec<Opti
     out
 }
 
+/// Bord par lequel une fenêtre est collée à une autre.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Below,
+    Above,
+    Right,
+    Left,
+}
+
+/// `child` touche-t-il `parent` (à `tol` près) ? Bord, et décalage le long de ce bord (x pour dessus/dessous, y pour
+/// gauche/droite).
+fn contact(parent: &R, child: &R, tol: i32) -> Option<(Side, i32)> {
+    let horiz = overlap(parent.x, parent.right(), child.x, child.right());
+    let vert = overlap(parent.y, parent.bottom(), child.y, child.bottom());
+    if horiz && (child.y - parent.bottom()).abs() <= tol {
+        Some((Side::Below, child.x - parent.x))
+    } else if horiz && (parent.y - child.bottom()).abs() <= tol {
+        Some((Side::Above, child.x - parent.x))
+    } else if vert && (child.x - parent.right()).abs() <= tol {
+        Some((Side::Right, child.y - parent.y))
+    } else if vert && (parent.x - child.right()).abs() <= tol {
+        Some((Side::Left, child.y - parent.y))
+    } else {
+        None
+    }
+}
+
+/// Arbre des fenêtres collées, en largeur depuis la fenêtre 0 (la principale) : `(fenêtre, parent)` dans l'ordre où
+/// les placer, le parent étant `(index, bord, décalage)`. Les fenêtres jamais atteintes deviennent des racines.
+/// `can_parent[i] == false` (fenêtre fermée) : elle peut s'accrocher à une autre, mais rien ne s'accroche à elle.
+pub fn dock_tree(rects: &[Option<R>], can_parent: &[bool], tol: i32) -> Vec<(usize, Option<(usize, Side, i32)>)> {
+    let mut out: Vec<(usize, Option<(usize, Side, i32)>)> = Vec::new();
+    let mut seen = vec![false; rects.len()];
+    for root in 0..rects.len() {
+        if seen[root] || rects[root].is_none() {
+            continue;
+        }
+        seen[root] = true;
+        let start = out.len();
+        out.push((root, None));
+        let mut i = start;
+        while i < out.len() {
+            let p = out[i].0;
+            i += 1;
+            if !can_parent.get(p).copied().unwrap_or(true) {
+                continue;
+            }
+            let Some(pr) = rects[p] else { continue };
+            for (c, cr) in rects.iter().enumerate() {
+                let Some(cr) = cr else { continue };
+                if seen[c] {
+                    continue;
+                }
+                if let Some((side, along)) = contact(&pr, cr, tol) {
+                    seen[c] = true;
+                    out.push((c, Some((p, side, along))));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Recolle les fenêtres après un changement de taille (autre agrandissement, autres unités) : chaque racine garde
+/// sa position, les autres reprennent leur place contre leur parent, à leur nouvelle taille `sizes`. Le décalage le
+/// long du bord est mis à l'échelle par `ratio` (nouvelle taille d'un pixel skin / ancienne). `main_at` : nouvelle
+/// position de la fenêtre 0 (celle que le système lui a vraiment donnée), que son groupe suit.
+pub fn redock(saved: &[Option<R>], can_parent: &[bool], sizes: &[Option<(i32, i32)>], ratio: f64, tol: i32, main_at: Option<(i32, i32)>) -> Vec<Option<R>> {
+    let mut out: Vec<Option<R>> = vec![None; saved.len()];
+    for (i, parent) in dock_tree(saved, can_parent, tol) {
+        let Some(old) = saved[i] else { continue };
+        let (w, h) = sizes.get(i).copied().flatten().unwrap_or((old.w, old.h));
+        out[i] = Some(match parent.and_then(|(p, side, along)| out[p].map(|pr| (pr, side, along))) {
+            None => match main_at {
+                Some((x, y)) if i == 0 => R::new(x, y, w, h),
+                _ => R::new(old.x, old.y, w, h),
+            },
+            Some((p, side, along)) => {
+                let a = (along as f64 * ratio).round() as i32;
+                match side {
+                    Side::Below => R::new(p.x + a, p.bottom(), w, h),
+                    Side::Above => R::new(p.x + a, p.y - h, w, h),
+                    Side::Right => R::new(p.right(), p.y + a, w, h),
+                    Side::Left => R::new(p.x - w, p.y + a, w, h),
+                }
+            }
+        });
+    }
+    out
+}
+
+/// Décalage vertical (positif ou nul) qui garde le haut de chaque fenêtre sous le haut de la zone utile (sous la
+/// barre de menus du Mac). Pour une fenêtre, la limite est le haut de la zone la plus haute parmi celles qui couvrent
+/// son milieu ; une fenêtre au-dessus d'aucun écran n'impose rien.
+pub fn clamp_top(moving: &[R], areas: &[R]) -> i32 {
+    let mut d = 0;
+    for m in moving {
+        let cx = m.x + m.w / 2;
+        if let Some(top) = areas.iter().filter(|a| cx >= a.x && cx < a.right()).map(|a| a.y).min() {
+            d = d.max(top - m.y);
+        }
+    }
+    d
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +270,57 @@ mod tests {
         let out = resize(&rects, 0, 550, 232);
         assert_eq!(out[1].unwrap().y, 232);
         assert_eq!(out[3].unwrap().x, 550);
+    }
+
+    #[test]
+    fn redock_after_zoom_change() {
+        // ×2 (demi-points : ×4) : principale, égaliseur dessous, playlist (174 px skin) dessous.
+        let saved = [Some(R::new(100, 60, 1100, 464)), Some(R::new(100, 524, 1100, 464)), Some(R::new(100, 988, 1100, 696))];
+        let all = [true, true, true];
+        // ×1,5 (demi-points : ×3).
+        let sizes = [Some((825, 348)), Some((825, 348)), Some((825, 522))];
+        let out = redock(&saved, &all, &sizes, 0.75, 2, None);
+        assert_eq!(out[0], Some(R::new(100, 60, 825, 348)));
+        assert_eq!(out[1], Some(R::new(100, 408, 825, 348)));
+        assert_eq!(out[2], Some(R::new(100, 756, 825, 522)));
+        // Bandeaux : égaliseur et playlist de 14 px skin sous la principale.
+        let saved = [Some(R::new(0, 0, 1100, 464)), Some(R::new(0, 464, 1100, 56)), Some(R::new(0, 520, 1100, 56))];
+        let sizes = [Some((825, 348)), Some((825, 42)), Some((825, 42))];
+        let out = redock(&saved, &all, &sizes, 0.75, 2, None);
+        assert_eq!(out[1].unwrap().y, 348);
+        assert_eq!(out[2].unwrap().y, 390);
+        // La principale a été replacée par le système (sous la barre de menus) : le groupe la suit.
+        let out = redock(&saved, &all, &sizes, 0.75, 2, Some((10, 48)));
+        assert_eq!(out[0], Some(R::new(10, 48, 825, 348)));
+        assert_eq!((out[2].unwrap().x, out[2].unwrap().y), (10, 438));
+    }
+
+    #[test]
+    fn redock_side_and_detached_windows() {
+        // Playlist à droite de la principale, décalée de 40 vers le bas ; égaliseur loin, non collé.
+        let saved = [Some(R::new(0, 0, 100, 50)), Some(R::new(500, 500, 100, 50)), Some(R::new(100, 40, 100, 100))];
+        let all = [true, true, true];
+        let sizes = [Some((150, 75)), Some((150, 75)), Some((150, 150))];
+        let out = redock(&saved, &all, &sizes, 1.5, 2, Some((0, 0)));
+        assert_eq!(out[2], Some(R::new(150, 60, 150, 150)));
+        assert_eq!(out[1], Some(R::new(500, 500, 150, 75)));
+        // Une fenêtre fermée ne sert pas de pont.
+        let saved = [Some(R::new(0, 0, 100, 50)), Some(R::new(0, 50, 100, 50)), Some(R::new(0, 100, 100, 50))];
+        let tree = dock_tree(&saved, &[true, false, true], 0);
+        assert_eq!(tree[2], (2, None));
+        assert_eq!(tree[1], (1, Some((0, Side::Below, 0))));
+    }
+
+    #[test]
+    fn clamp_under_menu_bar() {
+        // Zone utile sous une barre de menus de 48 demi-points ; un second écran au-dessus, à droite.
+        let areas = [R::new(0, 48, 3024, 1900), R::new(3024, -2160, 3840, 2160)];
+        assert_eq!(clamp_top(&[R::new(100, 10, 825, 348)], &areas), 38);
+        assert_eq!(clamp_top(&[R::new(100, 60, 825, 348)], &areas), 0);
+        // Le groupe entier est retenu par sa fenêtre la plus haute.
+        assert_eq!(clamp_top(&[R::new(100, 400, 825, 348), R::new(100, 30, 825, 348)], &areas), 18);
+        // Sur l'écran du dessus, la limite est son propre haut.
+        assert_eq!(clamp_top(&[R::new(4000, -100, 825, 348)], &areas), 0);
+        assert_eq!(clamp_top(&[R::new(4000, -2200, 825, 348)], &areas), 40);
     }
 }
