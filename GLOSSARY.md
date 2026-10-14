@@ -9,7 +9,8 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 | **Égaliseur** (EQ) | La fenêtre de 275×116 avec les 10 curseurs de bandes et le préampli. |
 | **Playlist** | La fenêtre redimensionnable (pas de 25×29) qui liste les morceaux. Aussi : la liste elle-même. |
 | **Bandeau** (windowshade) | Mode replié d'une fenêtre, 14 px de haut. |
-| **Double taille** | Affichage ×2 au plus proche voisin. Depuis la 0.5 : **Taille des fenêtres** (×1, ×2, ×3 ou automatique), pour toutes les fenêtres. |
+| **Double taille** | Affichage ×2 au plus proche voisin. Depuis la 0.5 : **Taille des fenêtres**, pour toutes les fenêtres ; depuis la 0.6.1, par demi-crans (×1, ×1,5, ×2, ×2,5, ×3 ou automatique). Cmd+D (Ctrl+D) bascule ×1 ↔ ×2 (ADR 0021). |
+| **Demi-cran** | Agrandissement ×1,5 ou ×2,5. Net sur un écran Retina (×3 ou ×5 pixels réels) ; pixels inégaux ailleurs (ADR 0021). |
 | **Aimantation** (snap) | Collage automatique des fenêtres entre elles et aux bords de l'écran (10 px). |
 | **Fenêtres attachées** | Fenêtres dont les bords se touchent exactement ; elles suivent la fenêtre principale quand on la déplace. |
 | **Fenêtre générique** | Fenêtre skinnée avec `gen.bmp` / `genex.bmp` : « Aller au morceau », « Ajouter une adresse », plus tard Bibliothèque et plugins (ADR 0016). |
@@ -39,7 +40,8 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 | **Pack de presets** | *Cream of the Crop*, téléchargé à la demande depuis le dépôt projectM (ADR 0012). |
 | **Navigateur de skins** | La fenêtre (Alt+S) qui cherche et télécharge des skins du Skin Museum (ADR 0012) ; onglets Musée et Mes skins. |
 | **Forme de fenêtre** | Contour non rectangulaire donné par le `region.txt` d'un skin (fenêtre principale, égaliseur). |
-| **Unité de disposition** | Points sur macOS, pixels physiques ailleurs : l'unité des positions du groupe aimanté. |
+| **Unité de disposition** | Demi-points sur macOS (points jusqu'à la 0.6.0), pixels physiques ailleurs : l'unité des positions du groupe aimanté (ADR 0021). |
+| **Recollage** | Au démarrage, chaque fenêtre reprend sa place contre celle à laquelle elle était collée à la fermeture, à sa taille du moment (ADR 0021). |
 | **Plugin livré** | L'un des trois plugins d'exemple intégrés au lecteur (ADR 0013), construits depuis `plugin-examples/`. |
 | **Effet audio** (DSP) | Plugin qui transforme le son, après l'égaliseur, dans le fil de décodage. |
 | **Carburant** (fuel) | Budget de calcul donné à chaque appel d'un plugin ; épuisé, le plugin est arrêté et éteint. |

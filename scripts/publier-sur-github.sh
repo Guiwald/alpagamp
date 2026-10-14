@@ -98,7 +98,7 @@ elif [ ${#FICHIERS[@]} -gt 0 ]; then
   NOTES="$(mktemp)"
   awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ {if (f) exit} f' alpagamp/CHANGELOG.md > "$NOTES"
   if [ -e "$ICI/dist/Alpagamp-$VERSION.dmg" ] && [ "$(uname -m)" = "arm64" ]; then
-    printf '\n> **Mac** : ce .dmg a été construit sur un Mac à puce Apple ; il ne marche que sur ces Mac (M1, M2, M3, M4…).\n> Les versions suivantes, fabriquées par GitHub, marcheront aussi sur les Mac Intel.\n' >> "$NOTES"
+    printf '\n> **Mac** : le premier .dmg mis en ligne est construit sur un Mac à puce Apple (M1, M2, M3, M4…) ; GitHub le\n> remplace en une vingtaine de minutes par un .dmg universel, qui marche aussi sur les Mac Intel.\n' >> "$NOTES"
   fi
   cat alpagamp/scripts/notes-installation.md >> "$NOTES"
   "$GH" release create "$TAG" "${FICHIERS[@]}" -R "$MOI/$DEPOT" --title "Alpagamp $VERSION" --notes-file "$NOTES"

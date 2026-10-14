@@ -32,6 +32,8 @@ le composant concerné (« Audio : … »).
   la zone utile de l'écran (sous la barre de menus, au-dessus du Dock).
 - Mac : l'égaliseur, la playlist et les autres fenêtres d'Alpagamp reviennent au premier plan avec la fenêtre
   qu'on active, au lancement comme au clic.
+- Publication : la note « Mac » des pages de version dit maintenant que GitHub remplace le premier .dmg (puce Apple)
+  par un .dmg universel, au lieu d'annoncer des Mac Intel « pour les versions suivantes ».
 
 ## [0.6.0] - 2026-10-14
 
