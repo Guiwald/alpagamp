@@ -57,6 +57,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Compilation
         run: cargo build --release -p alpagamp
+      - name: Outillage (cargo xtask, utilisé par la publication)
+        run: cargo check -p xtask
 
   android:
     name: Compilation (Android)

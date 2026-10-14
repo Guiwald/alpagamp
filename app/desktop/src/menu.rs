@@ -534,7 +534,8 @@ fn build_main(st: &MenuState, skins: &[PathBuf]) -> Menu {
 fn plugins_submenu(st: &MenuState) -> Submenu {
     let m = Submenu::new(t("menu.plugins"), true);
     for p in &st.plugins {
-        let title = if p.enabled { format!("✓ {}", p.name) } else { p.name.clone() };
+        // « • » : présent dans toutes les polices de menus (la coche ✓ manque à certaines sous Windows).
+        let title = if p.enabled { format!("• {}", p.name) } else { p.name.clone() };
         let sub = Submenu::new(title, true);
         let label = if p.kind == Kind::Vis { t("plugins.show") } else { t("plugins.enabled") };
         let _ = sub.append(&CheckMenuItem::with_id(format!("plg_on_{}", p.id), label, true, p.enabled, None));

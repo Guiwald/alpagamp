@@ -451,7 +451,9 @@ fn bundle_mac(binary: Option<PathBuf>, out_dir: Option<PathBuf>) -> Res {
 "#);
     std::fs::write(contents.join("Info.plist"), plist)?;
     println!("{}", app.display());
-    if cfg!(target_os = "macos") {
+    // Le .dmg ne se fabrique que sur macOS (hdiutil) ; ailleurs, seul le .app est produit.
+    #[cfg(target_os = "macos")]
+    {
         let run = |cmd: &mut std::process::Command| -> Res {
             let st = cmd.status()?;
             if !st.success() {

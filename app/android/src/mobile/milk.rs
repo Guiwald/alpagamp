@@ -454,11 +454,12 @@ impl Mobile {
                 None => None,
             };
             let hint_on = self.milk.hint_until.is_some_and(|u| Instant::now() < u);
+            let hint_text = t(if plugin { "plugins.hint" } else { "milk.hint" });
             self.milk.hint = match (hint_on, self.milk.hint.take()) {
                 (false, _) => None,
-                (true, Some(h)) => Some(h),
-                (true, None) => {
-                    let text = t("milk.hint").to_string();
+                (true, Some(h)) if h.0 == hint_text => Some(h),
+                (true, _) => {
+                    let text = hint_text.to_string();
                     let l = self.note_layer(&g, &text);
                     Some((text, l))
                 }

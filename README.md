@@ -264,7 +264,7 @@ a trois, déjà installés mais éteints au départ. Clic droit → **Plugins** 
   doucement à la fin) et ce qui se passe à la fin (arrêt ou pause). Le compte à rebours part quand tu l'actives, et
   le titre défilant te prévient à 5 minutes et à 1 minute de la fin. Elle s'éteint quand tu fermes Alpagamp.
 
-Le ✓ devant un nom veut dire que le plugin est allumé. **À propos…** dit qui l'a fait et ce qu'il fait.
+Le point (•) devant un nom veut dire que le plugin est allumé. **À propos…** dit qui l'a fait et ce qu'il fait.
 
 **Ajouter un plugin** : un plugin, c'est un fichier `.wasm`. **Glisse-le sur Alpagamp**, ou **Plugins** →
 **Installer un plugin…** : il est copié dans le dossier des plugins et s'allume tout de suite.

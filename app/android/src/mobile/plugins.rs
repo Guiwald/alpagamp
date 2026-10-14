@@ -52,7 +52,7 @@ impl Mobile {
             let mut items = vec![MenuItem::check(&format!("plg_on_{}", e.id), label, on)];
             items.extend(self.plugin_option_items(&e.id));
             items.push(MenuItem::new(&format!("plg_about_{}", e.id), t("plugins.about")));
-            let title = if on { format!("✓ {}", e.name()) } else { e.name().to_string() };
+            let title = if on { format!("• {}", e.name()) } else { e.name().to_string() };
             v.push(MenuItem::sub(&title, items));
         }
         for (f, _) in &self.player.plugins.broken {

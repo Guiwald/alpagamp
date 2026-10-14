@@ -6,6 +6,12 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+## [0.6.0] - 2026-10-14
+
+> Mise en service : Mac (`Alpagamp-0.6.0.dmg`) — remplacer l'application dans Applications. Windows — remplacer
+> le dossier. Android (`Alpagamp-0.6.0.apk`) — installer par-dessus la 0.5. Les plugins sont éteints au départ :
+> clic droit › Plugins (sur téléphone : menu › Plugins).
+
 ### Ajouté
 - Plugins : système de plugins en WebAssembly (API v1, ADR 0020) — chaque plugin tourne dans un bac à sable
   (wasmi : pas de disque, pas de réseau, mémoire plafonnée, temps de calcul limité) ; un plugin qui plante ou
@@ -17,6 +23,10 @@ le composant concerné (« Audio : … »).
   basses, clarté, limiteur), *Minuterie de sommeil* (5 min à 1 h 30, fondu, arrêt ou pause, rappels).
 - Plugins : sur téléphone, la visualisation de plugin s'affiche en plein écran, même sans carte graphique.
 - Développement : kit `alpagamp-plugin` et exemples dans `plugin-examples/`, `cargo xtask plugins`.
+
+### Corrigé
+- Publication : le paquet Windows fabriqué par GitHub échouait (`cargo xtask` ne compilait pas sous Windows) ; la
+  compilation automatique vérifie maintenant l'outillage sur Mac et Windows.
 
 ## [0.5.0] - 2026-10-14
 
