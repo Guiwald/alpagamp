@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp-android"
-version = "0.6.2"
+version = "0.6.3"
 description = "Alpagamp pour Android (Pixel 8) : les trois fenêtres empilées, au toucher"
 edition.workspace = true
 license.workspace = true

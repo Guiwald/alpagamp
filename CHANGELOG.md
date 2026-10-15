@@ -6,6 +6,24 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+## [0.6.3] - 2026-10-15
+
+> Mise en service : Mac (`Alpagamp-0.6.3.dmg`) — remplacer l'application dans Applications. Windows — remplacer
+> le dossier. Android (`Alpagamp-0.6.3.apk`) — installer par-dessus la 0.6.2. Rien à refaire : la connexion à
+> Spotify est gardée ; pour Spotify Connect, rechoisir « Alpagamp » dans l'appli Spotify, comme après chaque
+> lancement.
+
+### Modifié
+- Publication : les notes de chaque version sur GitHub donnent le français puis l'anglais (`CHANGELOG.en.md`,
+  traduction de ce journal) ; `publier-sur-github.sh --notes` réécrit celles des versions déjà publiées.
+- Docs : ADR 0018 révisée (pause en Spotify Connect ; pendant Spotify Connect, la playlist reste celle de
+  l'utilisateur).
+
+### Corrigé
+- Spotify Connect : après Pause puis Lecture dans Alpagamp, « Suivant » chargeait le morceau suivant en pause
+  (l'appli Spotify croyait la lecture toujours en pause). Le lecteur de Spotify n'est plus bloqué pendant une pause
+  d'Alpagamp et voit aussitôt la commande.
+
 ## [0.6.2] - 2026-10-15
 
 > Mise en service : Mac (`Alpagamp-0.6.2.dmg`) — remplacer l'application dans Applications. Windows — remplacer

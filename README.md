@@ -64,7 +64,7 @@ La version actuelle est la **0.6** : c'est une préversion. Elle marche, mais il
 | 0.3 | Les radios, le fondu enchaîné, ReplayGain, les signets, la première version Android | fait |
 | 0.4 | Spotify : connexion, Bibliothèque, Spotify Connect | fait |
 | 0.5 | Les visualisations façon MilkDrop (plein écran), le navigateur de skins, la taille des fenêtres | fait |
-| 0.6 | Des extensions (plugins) qu'on peut ajouter, avec trois exemples ; en 0.6.2, une Bibliothèque Spotify qui ne se fait plus brider | **version actuelle** |
+| 0.6 | Des extensions (plugins) qu'on peut ajouter, avec trois exemples ; en 0.6.2, une Bibliothèque Spotify qui ne se fait plus brider ; en 0.6.3, Spotify Connect qui reprend bien après une pause | **version actuelle** |
 | 0.7 | Android complet (musique qui continue écran éteint, commandes sur l'écran verrouillé), 7 langues partout | à venir |
 | 1.0 | Version finale, testée sur Mac, Android et Windows | à venir |
 

@@ -7,6 +7,22 @@ project (see `docs/versions.md`). Each entry starts with the part of the app it 
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-15
+
+> Rollout: Mac (`Alpagamp-0.6.3.dmg`) — replace the app in Applications. Windows — replace the folder. Android
+> (`Alpagamp-0.6.3.apk`) — install over 0.6.2. Nothing to redo: you stay signed in to Spotify; for Spotify
+> Connect, pick "Alpagamp" again in the Spotify app, as after every launch.
+
+### Changed
+- Release: the notes of each version on GitHub give French, then English (`CHANGELOG.en.md`, the translation of
+  the changelog); `publier-sur-github.sh --notes` rewrites those of versions already published.
+- Docs: ADR 0018 revised (pause in Spotify Connect; during Spotify Connect, the playlist stays the user's own).
+
+### Fixed
+- Spotify Connect: after Pause then Play in Alpagamp, "Next" loaded the next song paused (the Spotify app thought
+  playback was still paused). Spotify's player is no longer blocked while Alpagamp is paused, and sees the command
+  at once.
+
 ## [0.6.2] - 2026-10-15
 
 > Rollout: Mac (`Alpagamp-0.6.2.dmg`) — replace the app in Applications. Windows — replace the folder. Android
