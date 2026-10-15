@@ -3,12 +3,16 @@
 # enregistre la clé de signature Android dans les secrets du dépôt, et publie la version avec ses fichiers.
 #
 # Usage, depuis le dossier qui contient alpagamp.bundle :   bash publier-sur-github.sh
+#        pour seulement envoyer le code et réécrire les notes (français + anglais) de toutes les versions déjà
+#        publiées, sans rien publier ni remplacer de fichier :      bash publier-sur-github.sh --notes
 #
 # La connexion à GitHub se fait dans le navigateur, avec ton compte (aucun jeton à copier).
 set -euo pipefail
 ICI="$(cd "$(dirname "$0")" && pwd)"
 cd "$ICI"
 DEPOT="alpagamp"
+MODE="publier"
+if [ "${1:-}" = "--notes" ]; then MODE="notes"; fi
 
 echo "== 1/6 Outil GitHub (gh)"
 GH=""
@@ -69,6 +73,25 @@ git push -u origin main
 git push origin --tags
 cd "$ICI"
 
+if [ "$MODE" = "notes" ]; then
+  echo "== 5/5 Notes des versions déjà publiées (français + anglais)"
+  NOTES="$(mktemp)"
+  for T in $("$GH" release list -R "$MOI/$DEPOT" --limit 200 --json tagName -q '.[].tagName'); do
+    if bash alpagamp/scripts/notes-de-version.sh "${T#v}" "$ICI/alpagamp" > "$NOTES" 2>/dev/null; then
+      "$GH" release edit "$T" -R "$MOI/$DEPOT" --notes-file "$NOTES" >/dev/null
+      echo "  $T : notes réécrites"
+    else
+      echo "  $T : pas de section dans le CHANGELOG, notes inchangées"
+    fi
+  done
+  rm -f "$NOTES"
+  echo
+  echo "Terminé ! Aucun fichier publié ni remplacé."
+  echo "  Les versions :  https://github.com/$MOI/$DEPOT/releases"
+  open "https://github.com/$MOI/$DEPOT/releases" >/dev/null 2>&1 || true
+  exit 0
+fi
+
 echo "== 5/6 Clé de signature Android"
 CLE="$ICI/signature-android/alpagamp-release.p12"
 MDP="$ICI/signature-android/mot-de-passe.txt"
@@ -96,11 +119,10 @@ if "$GH" release view "$TAG" -R "$MOI/$DEPOT" >/dev/null 2>&1; then
   echo "La version $VERSION existait déjà : fichiers mis à jour."
 elif [ ${#FICHIERS[@]} -gt 0 ]; then
   NOTES="$(mktemp)"
-  awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ {if (f) exit} f' alpagamp/CHANGELOG.md > "$NOTES"
-  if [ -e "$ICI/dist/Alpagamp-$VERSION.dmg" ] && [ "$(uname -m)" = "arm64" ]; then
-    printf '\n> **Mac** : le premier .dmg mis en ligne est construit sur un Mac à puce Apple (M1, M2, M3, M4…) ; GitHub le\n> remplace en une vingtaine de minutes par un .dmg universel, qui marche aussi sur les Mac Intel.\n' >> "$NOTES"
-  fi
-  cat alpagamp/scripts/notes-installation.md >> "$NOTES"
+  NOTE_MAC=0
+  if [ -e "$ICI/dist/Alpagamp-$VERSION.dmg" ] && [ "$(uname -m)" = "arm64" ]; then NOTE_MAC=1; fi
+  # Notes en français puis en anglais (CHANGELOG.md, CHANGELOG.en.md) et l'installation.
+  ALPAGAMP_NOTE_MAC="$NOTE_MAC" bash alpagamp/scripts/notes-de-version.sh "$VERSION" "$ICI/alpagamp" > "$NOTES"
   "$GH" release create "$TAG" "${FICHIERS[@]}" -R "$MOI/$DEPOT" --title "Alpagamp $VERSION" --notes-file "$NOTES"
   rm -f "$NOTES"
 else

@@ -442,7 +442,8 @@ cargo run -p alpagamp-android --bin phone-sim                                   
 | `xtask` | L'outillage (paquets, APK, icônes, versions) |
 
 Les choix importants sont expliqués dans [`docs/adr`](docs/adr/README.md), le vocabulaire dans
-[`GLOSSARY.md`](GLOSSARY.md), les changements dans [`CHANGELOG.md`](CHANGELOG.md).
+[`GLOSSARY.md`](GLOSSARY.md), les changements dans [`CHANGELOG.md`](CHANGELOG.md) (en anglais :
+[`CHANGELOG.en.md`](CHANGELOG.en.md)).
 
 ### Écrire un plugin
 
@@ -507,6 +508,9 @@ full menu; Alt+L opens the Library (Spotify, radios); drop a `.wsz` skin (from <
 change the look, or browse skins with Alt+S. Ctrl+Shift+K opens the visualization (double-click for full screen).
 Options › Window size sets ×1/×2/×3. Right-click › Plugins turns plugins on and sets their options; drop a
 `.wasm` file to install one. Classic shortcuts: Z X C V B for previous/play/pause/stop/next.
+
+**What's new:** see [`CHANGELOG.en.md`](CHANGELOG.en.md), or the notes of each
+[release](https://github.com/Guiwald/alpagamp/releases) (French first, then English).
 
 **Build from source:** install Rust (<https://rustup.rs>), then `git clone https://github.com/Guiwald/alpagamp`,
 `cd alpagamp`, `cargo run --release` (on Linux, first `sudo apt install libasound2-dev pkg-config`).

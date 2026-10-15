@@ -104,11 +104,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Notes de version (tirées du CHANGELOG)
-        run: |
-          V="${TAG#v}"
-          awk -v v="$V" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ {if (f) exit} f' CHANGELOG.md > notes.md
-          cat scripts/notes-installation.md >> notes.md
+      - name: Notes de version (CHANGELOG en français, puis en anglais)
+        run: bash scripts/notes-de-version.sh "${TAG#v}" > notes.md
       - name: Publication
         env:
           GH_TOKEN: ${{ github.token }}

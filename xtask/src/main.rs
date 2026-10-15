@@ -342,11 +342,17 @@ fn bump(kind: Option<&str>) -> Res {
             std::fs::write(&f, out.join("\n") + "\n")?;
         }
     }
-    let cl = root.join("CHANGELOG.md");
-    let t = std::fs::read_to_string(&cl)?;
-    let t = t.replacen("## [Non publié]", &format!("## [Non publié]\n\n## [{new}] - {}", today()), 1);
-    std::fs::write(&cl, t)?;
-    println!("{old} → {new} (compléter « Mise en service » dans CHANGELOG.md)");
+    // Les deux journaux (français, anglais) reçoivent le même titre de version : les notes de version les citent.
+    for (nom, non_publie) in [("CHANGELOG.md", "## [Non publié]"), ("CHANGELOG.en.md", "## [Unreleased]")] {
+        let cl = root.join(nom);
+        if !cl.exists() {
+            continue;
+        }
+        let t = std::fs::read_to_string(&cl)?;
+        let t = t.replacen(non_publie, &format!("{non_publie}\n\n## [{new}] - {}", today()), 1);
+        std::fs::write(&cl, t)?;
+    }
+    println!("{old} → {new} (compléter « Mise en service » dans CHANGELOG.md et « Rollout » dans CHANGELOG.en.md)");
     Ok(())
 }
 
