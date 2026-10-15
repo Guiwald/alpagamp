@@ -11,6 +11,7 @@ use symphonia::core::meta::{MetadataOptions, MetadataRevision, StandardTag};
 use symphonia::core::units::Time;
 
 use crate::AudioError;
+use crate::readahead::ReadAhead;
 
 /// Informations sur le morceau en cours de lecture.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -61,15 +62,19 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    /// Ouvre un fichier local.
+    /// Ouvre un fichier local **pour le jouer** : un fil le lit d'avance ([`ReadAhead`]), pour qu'un disque lent
+    /// ne coupe pas la musique.
     pub fn open_file(path: &Path) -> Result<Decoder, AudioError> {
+        let src = ReadAhead::open(path).map_err(|e| AudioError::Open(format!("{}: {e}", path.display())))?;
+        let size = src.byte_len();
+        Self::open(Box::new(src), hint_for(path), size)
+    }
+
+    /// Ouvre un fichier local pour en lire les informations (titre, durée…) sans lecture d'avance.
+    pub fn probe_file(path: &Path) -> Result<Decoder, AudioError> {
         let file = std::fs::File::open(path).map_err(|e| AudioError::Open(format!("{}: {e}", path.display())))?;
         let size = file.metadata().map(|m| m.len()).ok();
-        let mut hint = Hint::new();
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            hint.with_extension(ext);
-        }
-        Self::open(Box::new(file), hint, size)
+        Self::open(Box::new(file), hint_for(path), size)
     }
 
     /// Ouvre une source quelconque (fichier, flux réseau…).
@@ -215,6 +220,14 @@ impl Decoder {
     }
 }
 
+fn hint_for(path: &Path) -> Hint {
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    hint
+}
+
 /// Convertit `ch` canaux entrelacés en stéréo entrelacée (mono dupliqué, multicanal réduit).
 fn to_stereo(src: &[f32], ch: usize, out: &mut Vec<f32>) {
     match ch {
@@ -344,6 +357,41 @@ pub(crate) mod tests {
             after = out.len() / 2;
         }
         assert!((after as i64 - 44_100).abs() < 2000, "après seek : {after}");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Décoder depuis un disque qui bloque régulièrement 1,5 s : une fois le fichier lu d'avance, le décodage ne
+    /// l'attend plus jamais (avant la 0.6.2, chaque bloc de 32 Ko pouvait bloquer la musique).
+    #[test]
+    fn decoding_from_a_slow_disk_never_waits() {
+        use crate::readahead::tests::SlowDisk;
+        use std::time::{Duration, Instant};
+        let dir = std::env::temp_dir().join(format!("alpagamp-slow-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("sine.wav");
+        sine_wav(&p, 24_000, 8.0, 440.0);
+        let bytes = std::fs::read(&p).unwrap();
+        let len = bytes.len() as u64;
+        let disk = SlowDisk { inner: std::io::Cursor::new(bytes), delay: Duration::from_millis(5), stall: Duration::from_millis(1500), stall_every: 3, reads: 0 };
+        let src = ReadAhead::new(disk, len).unwrap();
+        let t = Instant::now();
+        while src.buffered_ahead() < len {
+            assert!(t.elapsed() < Duration::from_secs(20));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let mut d = Decoder::open(Box::new(src), Hint::new(), Some(len)).unwrap();
+        let mut out = Vec::new();
+        let mut worst = Duration::ZERO;
+        loop {
+            let t = Instant::now();
+            let n = d.decode_next(&mut out).unwrap();
+            worst = worst.max(t.elapsed());
+            if n == 0 {
+                break;
+            }
+        }
+        assert_eq!(out.len(), 24_000 * 8 * 2);
+        assert!(worst < Duration::from_millis(50), "un paquet a attendu {worst:?}");
         std::fs::remove_dir_all(dir).ok();
     }
 

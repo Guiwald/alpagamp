@@ -6,6 +6,47 @@ le composant concerné (« Audio : … »).
 
 ## [Non publié]
 
+## [0.6.2] - 2026-10-15
+
+> Mise en service : Mac (`Alpagamp-0.6.2.dmg`) — remplacer l'application dans Applications. Windows — remplacer
+> le dossier. Android (`Alpagamp-0.6.2.apk`) — installer par-dessus la 0.6.1. Rien à refaire pour Spotify : la
+> connexion est gardée ; la Bibliothèque se remplit à la première ouverture, puis s'affiche aussitôt.
+
+### Ajouté
+- Spotify : les listes de la Bibliothèque (playlists, titres likés, albums, contenu d'une playlist ou d'un album)
+  sont gardées sur disque : elles s'affichent tout de suite, même hors ligne, et ne sont redemandées à Spotify que
+  si elles ont plus de 15 min, ou par la ligne **Actualiser** en tête de liste (avec l'âge de la liste).
+- Spotify : quand Spotify demande de patienter, la Bibliothèque l'écrit avec un **compte à rebours**
+  (« réessaie dans 11:42 ») au-dessus de la dernière liste reçue, et ne redemande rien avant l'heure dite ; à
+  l'échéance, la ligne devient « Réessayer maintenant ».
+- Spotify : pendant la connexion, la Bibliothèque (et le menu Spotify) proposent **Rouvrir la page de connexion**
+  et **Annuler** ; un nouveau clic sur « Se connecter » rouvre la même page.
+- Spotify : `alpagamp --diagnostic-spotify [rapport.txt]` — une poignée de requêtes en lecture seule sur chaque
+  canal, avec codes de réponse, attentes et durées (jamais de jeton).
+- Bibliothèque : les longues listes s'affichent au fur et à mesure (« Chargement… 500/2 345 »).
+
+### Modifié
+- Spotify : la Bibliothèque passe par les canaux internes de Spotify (ceux de ses propres applis, par la session
+  librespot) au lieu de l'API web publique : playlists, titres likés, albums, contenu des playlists et des
+  albums, recherche de titres. L'API web ne sert plus qu'à chercher des albums et des playlists (ADR 0022).
+- Spotify : jusqu'à 10 000 éléments par liste (2 000 avant) ; les dossiers de playlists sont aplatis, leur nom
+  en sous-titre.
+
+### Corrigé
+- Spotify : « Spotify demande de patienter (trop de requêtes) » juste après la connexion, onglets vides. Spotify
+  bride l'API web pour les jetons obtenus avec l'identifiant du lecteur de bureau, que partagent tous les
+  lecteurs basés sur librespot ; Alpagamp, en plus, ignorait `Retry-After` et redemandait tout à chaque
+  changement d'onglet.
+- Spotify : fermer l'onglet du navigateur avant d'avoir autorisé bloquait la connexion 5 minutes, sans moyen de
+  la relancer. Au bout de 5 min sans réponse, on revient maintenant à « Se connecter », sans message d'erreur.
+- Audio : la musique sautait (coupures de 1 à 2 s toutes les 7 à 8 s) quand le fichier était sur un disque lent,
+  par exemple un disque externe qui se réveille ou que Spotlight indexe. Un fil lit maintenant le fichier
+  d'avance (jusqu'à 16 Mo, soit le morceau entier le plus souvent) ; le décodeur ne touche plus au disque.
+- Interface : « File info » sur un autre morceau que celui en cours ne fige plus le lecteur pendant la lecture du
+  fichier.
+- Publication : `construire-mac.sh` et `publier-sur-github.sh` remettent le code à jour même si un essai a laissé
+  une copie modifiée (par exemple `Cargo.lock`).
+
 ## [0.6.1] - 2026-10-14
 
 > Mise en service : Mac (`Alpagamp-0.6.1.dmg`) — remplacer l'application dans Applications ; au premier lancement,

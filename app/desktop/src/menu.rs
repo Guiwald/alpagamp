@@ -26,6 +26,8 @@ pub struct MenuState<'a> {
     pub bookmarks: Vec<String>,
     pub library_open: bool,
     pub spotify_connected: bool,
+    /// Connexion en cours (attente du navigateur).
+    pub spotify_authorizing: bool,
     pub milk_open: bool,
     /// Agrandissement effectif des fenêtres, en pour cent.
     pub scale: u32,
@@ -158,6 +160,7 @@ impl Menus {
             "win_lib" => ToggleLibrary,
             "spotify_login" => SpotifyLogin,
             "spotify_logout" => SpotifyLogout,
+            "spotify_cancel_login" => SpotifyCancelLogin,
             "jump" => JumpToFile,
             "eq_on" => ToggleEq,
             "eq_auto" => ToggleEqAuto,
@@ -386,6 +389,10 @@ fn spotify_submenu(st: &MenuState) -> Submenu {
     let m = Submenu::new("Spotify", true);
     if st.spotify_connected {
         let _ = m.append(&item("spotify_logout", "lib.logout"));
+    } else if st.spotify_authorizing {
+        // L'onglet du navigateur a pu être fermé : rouvrir la même page, ou abandonner.
+        let _ = m.append(&item("spotify_login", "lib.reopen"));
+        let _ = m.append(&item("spotify_cancel_login", "lib.cancel_login"));
     } else {
         let _ = m.append(&item("spotify_login", "lib.login"));
     }

@@ -23,7 +23,7 @@ rustup update stable --no-self-update >/dev/null 2>&1 || true
 echo "== 3/4 Code source"
 if [ -d alpagamp/.git ]; then
   git -C alpagamp fetch -q "$ICI/alpagamp.bundle" main
-  git -C alpagamp checkout -q -B main FETCH_HEAD
+  git -C alpagamp checkout -q -f -B main FETCH_HEAD
 else
   git clone -q -b main "$ICI/alpagamp.bundle" alpagamp
 fi

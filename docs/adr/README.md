@@ -14,7 +14,7 @@ effacée : sa fiche passe au statut « remplacée par ADR n » et reste là.
 | [0007](0007-plateformes.md) | Plateformes et définition du livrable | acceptée |
 | [0008](0008-depot-public-et-ci.md) | Dépôt public, compilation par GitHub Actions | acceptée |
 | [0009](0009-nom-alpagamp.md) | Le lecteur s'appelle Alpagamp | acceptée |
-| [0010](0010-choisir-sa-musique-spotify.md) | Choisir sa musique Spotify, sans configuration | acceptée |
+| [0010](0010-choisir-sa-musique-spotify.md) | Choisir sa musique Spotify, sans configuration | acceptée, révisée (suite : 0022) |
 | [0011](0011-moteur-milkdrop.md) | Moteur MilkDrop : audit de lactea, sinon moteur maison | acceptée (suite : 0019) |
 | [0012](0012-presets-et-skins-tiers.md) | Arrivée des presets et skins tiers | acceptée |
 | [0013](0013-plugins-d-exemple.md) | Plugins d'exemple | acceptée |
@@ -26,3 +26,4 @@ effacée : sa fiche passe au statut « remplacée par ADR n » et reste là.
 | [0019](0019-lactea.md) | Moteur MilkDrop : lactea retenu après audit, composition GPU | acceptée |
 | [0020](0020-api-des-plugins.md) | API des plugins WebAssembly (v1) : wasmi, carburant, trois sortes, kit et exemples | acceptée |
 | [0021](0021-fenetres-mac-position-reelle-et-demi-crans.md) | Fenêtres sur macOS : position réelle, recollage au démarrage, premier plan, demi-crans (0.6.1) | acceptée |
+| [0022](0022-bibliotheque-spotify-canaux-internes.md) | Bibliothèque Spotify par les canaux internes, listes gardées, attente de Spotify, connexion relançable, lecture d'avance (0.6.2) | acceptée |

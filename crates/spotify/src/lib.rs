@@ -6,20 +6,28 @@
 //!   enchaîné s'appliquent) ; librespot décode, un tampon fait le lien (`sink`).
 //! - Spotify Connect : Alpagamp apparaît comme appareil dans l'appli Spotify ; ce qu'on y lance passe aussi par
 //!   le moteur.
-//! - Bibliothèque : playlists, titres likés, albums et recherche par l'API web ; radios par radio-browser.info.
+//! - Bibliothèque (ADR 0022) : playlists, titres likés, albums et recherche de titres par les canaux internes
+//!   de Spotify ; albums et playlists d'une recherche par l'API web ; listes gardées sur disque ; radios par
+//!   radio-browser.info.
 
+pub mod diagnostic;
+pub mod internal;
+pub mod library;
 pub mod oauth;
 pub mod radios;
 pub mod sink;
 pub mod webapi;
 
+pub use library::{Fault, LibraryReply, Notice};
+
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use alpagamp_audio::{AudioError, Opener, PcmSource, TrackInfo};
-use alpagamp_core::library::LibraryItem;
+use alpagamp_core::library::{LibraryItem, LibraryKind};
 use crossbeam_channel::{Receiver, Sender};
 use librespot_connect::{ConnectConfig, Spirc};
 use librespot_core::authentication::Credentials;
@@ -33,7 +41,8 @@ use librespot_playback::mixer::{Mixer, MixerConfig, NoOpVolume};
 use librespot_playback::player::{Player, PlayerEvent};
 use parking_lot::Mutex;
 
-use crate::oauth::OAuthToken;
+use crate::library::{DEFAULT_WAIT, FRESH, ListCache, cache_key_for_uri, now_secs};
+use crate::oauth::{Attempt, AuthError, OAuthToken};
 use crate::sink::{BufferSink, BufferSource, Shared};
 
 /// État de la connexion.
@@ -70,7 +79,8 @@ pub enum Event {
     ConnectResume,
     /// Connect s'arrête (autre appareil choisi, déconnexion).
     ConnectStop,
-    Library { request: u64, result: Result<Vec<LibraryItem>, String> },
+    /// Réponse de la Bibliothèque (plusieurs peuvent arriver pour une requête : voir [`LibraryReply::last`]).
+    Library { request: u64, reply: LibraryReply },
 }
 
 /// Commandes de Spotify Connect.
@@ -98,7 +108,16 @@ struct Inner {
     connect_active: AtomicBool,
     token: Mutex<Option<OAuthToken>>,
     next_request: AtomicU64,
+    /// Connexion par le navigateur en cours (pour rouvrir la page ou annuler).
+    login: Mutex<Option<Arc<Attempt>>>,
+    lists: ListCache,
+    /// Attente demandée par Spotify, par canal (« interne », « web ») : échéance en secondes depuis 1970.
+    waits: Mutex<HashMap<String, u64>>,
 }
+
+/// Canaux de la Bibliothèque.
+const INTERNAL: &str = "interne";
+const WEB: &str = "web";
 
 /// Le client Spotify (et l'annuaire de radios).
 pub struct Spotify {
@@ -247,7 +266,7 @@ impl Inner {
     }
 
     /// Jeton pour l'API web : celui de la connexion (renouvelé), sinon celui de la session.
-    fn web_token(&self) -> Result<String, String> {
+    fn web_token(&self) -> Result<String, Fault> {
         let current = self.token.lock().clone();
         if let Some(t) = current {
             if !t.is_expired() {
@@ -258,9 +277,225 @@ impl Inner {
                 return Ok(n.access_token);
             }
         }
-        let session = self.session.lock().clone().ok_or("Spotify : pas connecté")?;
-        let t = self.rt.block_on(session.login5().auth_token()).map_err(readable)?;
+        let session = self.session.lock().clone().ok_or(Fault::NotConnected)?;
+        let t = self.rt.block_on(session.login5().auth_token()).map_err(|e| Fault::from_librespot(&e))?;
         Ok(t.access_token)
+    }
+
+    // --- Bibliothèque ---------------------------------------------------------------------------------
+
+    /// Échéance de l'attente demandée par Spotify sur ce canal, si elle court encore.
+    fn wait_until(&self, channel: &str) -> Option<u64> {
+        self.waits.lock().get(channel).copied().filter(|u| *u > now_secs())
+    }
+
+    fn set_wait(&self, channel: &str, wait: Option<Duration>) -> u64 {
+        let until = now_secs() + wait.unwrap_or(DEFAULT_WAIT).as_secs().max(1);
+        let mut w = self.waits.lock();
+        w.insert(channel.to_string(), until);
+        w.retain(|_, u| *u > now_secs());
+        self.lists.store_waits(&w);
+        until
+    }
+
+    /// La session, pour la Bibliothèque : on attend un peu si la connexion est en cours.
+    fn library_session(&self) -> Result<Session, Fault> {
+        if let Some(s) = self.session.lock().clone() {
+            return Ok(s);
+        }
+        if matches!(*self.status.lock(), Status::Connecting) {
+            return self.wait_session(Duration::from_secs(20)).map_err(|_| Fault::NotConnected);
+        }
+        Err(Fault::NotConnected)
+    }
+
+    fn send(&self, id: u64, reply: LibraryReply) {
+        let _ = self.tx.send(Event::Library { request: id, reply });
+    }
+
+    /// Sert une requête de la Bibliothèque (dans un fil à part).
+    fn serve(self: &Arc<Self>, id: u64, req: LibraryRequest, force: bool) {
+        match req {
+            LibraryRequest::RadioTop => self.send(id, radio_reply(radios::top())),
+            LibraryRequest::RadioSearch(q) => self.send(id, radio_reply(radios::search(&q))),
+            LibraryRequest::Search(q) => self.serve_search(id, &q),
+            LibraryRequest::Playlists { liked_label } => {
+                let liked = LibraryItem::new(LibraryKind::Playlist, liked_label, "", "spotify:collection");
+                self.serve_list(id, Some("playlists".into()), force, move |mut v| {
+                    v.insert(0, liked.clone());
+                    v
+                }, |me, s, _| me.rt.block_on(internal::rootlist(s)));
+            }
+            LibraryRequest::Albums => self.serve_list(id, Some("albums".into()), force, |v| v, |me, s, progress| me.fetch_albums(s, progress)),
+            LibraryRequest::Tracks(uri) => {
+                let key = cache_key_for_uri(&uri);
+                self.serve_list(id, key, force, |v| v, move |me, s, progress| me.fetch_tracks(s, &uri, progress));
+            }
+        }
+    }
+
+    /// Une liste : gardée si elle est récente, sinon redemandée (la liste gardée s'affiche en attendant).
+    fn serve_list(
+        self: &Arc<Self>,
+        id: u64,
+        key: Option<String>,
+        force: bool,
+        decorate: impl Fn(Vec<LibraryItem>) -> Vec<LibraryItem>,
+        fetch: impl FnOnce(&Arc<Self>, &Session, &mut dyn FnMut(Vec<LibraryItem>, usize)) -> Result<Vec<LibraryItem>, Fault>,
+    ) {
+        let cached = key.as_deref().and_then(|k| self.lists.load(k));
+        let refreshable = key.is_some();
+        let reply = |items: Vec<LibraryItem>, complete: bool, cached_age: Option<u64>, notice: Option<Notice>, last: bool| LibraryReply {
+            items: decorate(items),
+            complete,
+            cached_age,
+            notice,
+            progress: None,
+            last,
+            refreshable,
+        };
+        let from_cache = |notice: Option<Notice>| match &cached {
+            Some((items, age)) => reply(items.clone(), true, Some(*age), notice, true),
+            None => LibraryReply { refreshable, ..LibraryReply::failed(notice.unwrap_or(Notice::NotConnected)) },
+        };
+        if let Some((items, age)) = &cached {
+            if !force && *age < FRESH.as_secs() {
+                self.send(id, reply(items.clone(), true, Some(*age), None, true));
+                return;
+            }
+        }
+        if let Some(until) = self.wait_until(INTERNAL) {
+            self.send(id, from_cache(Some(Notice::Wait { until, partial: false })));
+            return;
+        }
+        let session = match self.library_session() {
+            Ok(s) => s,
+            Err(f) => {
+                self.send(id, from_cache(Some(if f == Fault::NotConnected { Notice::NotConnected } else { Notice::Failed(f) })));
+                return;
+            }
+        };
+        if let Some((items, age)) = &cached {
+            self.send(id, reply(items.clone(), true, Some(*age), None, false));
+        }
+        let show_progress = cached.is_none();
+        let mut last_sent = Instant::now();
+        let mut progress = |items: Vec<LibraryItem>, total: usize| {
+            if show_progress && last_sent.elapsed() >= Duration::from_millis(700) {
+                last_sent = Instant::now();
+                let n = items.len();
+                let mut r = reply(items, false, None, None, false);
+                r.progress = Some((n, total));
+                self.send(id, r);
+            }
+        };
+        match fetch(self, &session, &mut progress) {
+            Ok(items) => {
+                if let Some(k) = &key {
+                    self.lists.store(k, &items);
+                }
+                self.send(id, reply(items, true, None, None, true));
+            }
+            Err(Fault::RateLimited(wait)) => {
+                let until = self.set_wait(INTERNAL, wait);
+                self.send(id, from_cache(Some(Notice::Wait { until, partial: false })));
+            }
+            Err(f) => {
+                log::warn!("Spotify (bibliothèque) : {f:?}");
+                self.send(id, from_cache(Some(Notice::Failed(f))));
+            }
+        }
+    }
+
+    /// Morceaux d'une liste d'adresses, avec leurs noms (par paquets ; `progress` reçoit les morceaux prêts).
+    fn named_tracks(&self, session: &Session, uris: &[String], progress: &mut dyn FnMut(Vec<LibraryItem>, usize)) -> Result<Vec<LibraryItem>, Fault> {
+        let total = uris.len();
+        let meta = self.rt.block_on(internal::metadata(session, uris, |m| {
+            let ready: Vec<LibraryItem> = internal::track_items(uris, m).into_iter().filter(|i| m.contains_key(&i.uri)).collect();
+            progress(ready, total);
+        }))?;
+        Ok(internal::track_items(uris, &meta))
+    }
+
+    fn fetch_tracks(&self, session: &Session, uri: &str, progress: &mut dyn FnMut(Vec<LibraryItem>, usize)) -> Result<Vec<LibraryItem>, Fault> {
+        if uri == "spotify:collection" {
+            let all = self.rt.block_on(internal::collection(session))?;
+            let uris: Vec<String> = all.into_iter().map(|c| c.uri).filter(|u| internal::is_playable_uri(u)).take(internal::MAX_ITEMS).collect();
+            self.named_tracks(session, &uris, progress)
+        } else if let Some(id) = uri.strip_prefix("spotify:playlist:") {
+            let (uris, _) = self.rt.block_on(internal::playlist_uris(session, id))?;
+            self.named_tracks(session, &uris, progress)
+        } else if uri.starts_with("spotify:album:") {
+            let (uris, album_artists) = self.rt.block_on(internal::album_uris(session, uri))?;
+            let mut items = self.named_tracks(session, &uris, progress)?;
+            for it in items.iter_mut().filter(|i| i.subtitle.is_empty()) {
+                it.subtitle = album_artists.clone();
+            }
+            Ok(items)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    fn fetch_albums(&self, session: &Session, progress: &mut dyn FnMut(Vec<LibraryItem>, usize)) -> Result<Vec<LibraryItem>, Fault> {
+        let all = self.rt.block_on(internal::collection(session))?;
+        let uris: Vec<String> = all.into_iter().map(|c| c.uri).filter(|u| u.starts_with("spotify:album:")).take(internal::MAX_ITEMS).collect();
+        let total = uris.len();
+        let to_items = |m: &HashMap<String, internal::Meta>, only_ready: bool| -> Vec<LibraryItem> {
+            uris.iter()
+                .filter_map(|u| match m.get(u) {
+                    Some(a) => Some(LibraryItem::new(LibraryKind::Album, if a.name.is_empty() { u.as_str() } else { a.name.as_str() }, a.artists.clone(), u.clone())),
+                    None if only_ready => None,
+                    None => Some(LibraryItem::new(LibraryKind::Album, u.clone(), "", u.clone())),
+                })
+                .collect()
+        };
+        let meta = self.rt.block_on(internal::metadata(session, &uris, |m| progress(to_items(m, true), total)))?;
+        Ok(to_items(&meta, false))
+    }
+
+    /// Recherche : titres par le canal interne (envoyés d'abord), puis albums et playlists par l'API web si
+    /// elle ne demande pas de patienter.
+    fn serve_search(self: &Arc<Self>, id: u64, query: &str) {
+        if let Some(until) = self.wait_until(INTERNAL) {
+            self.send(id, LibraryReply::failed(Notice::Wait { until, partial: false }));
+            return;
+        }
+        let session = match self.library_session() {
+            Ok(s) => s,
+            Err(f) => {
+                self.send(id, LibraryReply::failed(if f == Fault::NotConnected { Notice::NotConnected } else { Notice::Failed(f) }));
+                return;
+            }
+        };
+        let tracks = self.rt.block_on(internal::search_tracks(&session, query)).and_then(|uris| self.named_tracks(&session, &uris, &mut |_, _| {}));
+        let mut items = match tracks {
+            Ok(t) => t,
+            Err(Fault::RateLimited(wait)) => {
+                let until = self.set_wait(INTERNAL, wait);
+                self.send(id, LibraryReply::failed(Notice::Wait { until, partial: false }));
+                return;
+            }
+            Err(f) => {
+                log::warn!("Spotify (recherche) : {f:?}");
+                Vec::new()
+            }
+        };
+        let mut notice = None;
+        if let Some(until) = self.wait_until(WEB) {
+            notice = Some(Notice::Wait { until, partial: true });
+        } else {
+            self.send(id, LibraryReply { last: false, ..LibraryReply::done(items.clone()) });
+            match self.web_token().and_then(|tok| webapi::search_albums_playlists(&tok, query)) {
+                Ok(more) => items.extend(more),
+                Err(Fault::RateLimited(wait)) => {
+                    let until = self.set_wait(WEB, wait);
+                    notice = Some(Notice::Wait { until, partial: true });
+                }
+                Err(f) => log::warn!("Spotify (recherche, API web) : {f:?}"),
+            }
+        }
+        self.send(id, LibraryReply { notice, ..LibraryReply::done(items) });
     }
 
     fn open_track(self: &Arc<Self>, uri: &str) -> Result<Box<dyn PcmSource>, AudioError> {
@@ -305,6 +540,8 @@ impl Spotify {
             id
         });
         let token = std::fs::read(dir.join("oauth.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+        let lists = ListCache::new(&dir);
+        let waits = Mutex::new(lists.load_waits());
         let (tx, events) = crossbeam_channel::unbounded();
         let inner = Arc::new(Inner {
             rt,
@@ -321,6 +558,9 @@ impl Spotify {
             connect_active: AtomicBool::new(false),
             token: Mutex::new(token),
             next_request: AtomicU64::new(1),
+            login: Mutex::new(None),
+            lists,
+            waits,
         });
         let s = Spotify { inner, events };
         s.reconnect();
@@ -351,19 +591,38 @@ impl Spotify {
         self.events.try_iter().collect()
     }
 
-    /// Se connecter : ouvre le navigateur, attend l'autorisation, ouvre la session.
+    /// Se connecter : ouvre le navigateur, attend l'autorisation, ouvre la session. Pendant l'attente, un
+    /// nouvel appel rouvre la même page (l'onglet a pu être fermé).
     pub fn login(&self) {
-        if matches!(self.status(), Status::Authorizing | Status::Connecting | Status::Connected { .. }) {
-            return;
+        match self.status() {
+            Status::Authorizing => {
+                self.reopen_login();
+                return;
+            }
+            Status::Connecting | Status::Connected { .. } => return,
+            _ => {}
         }
+        let attempt = Arc::new(Attempt::default());
+        *self.inner.login.lock() = Some(attempt.clone());
+        self.inner.set_status(Status::Authorizing);
         let inner = self.inner.clone();
         std::thread::Builder::new()
             .name("alpagamp-spotify-login".into())
             .spawn(move || {
-                inner.set_status(Status::Authorizing);
-                let token = match oauth::authorize(&*inner.open_url) {
+                let result = oauth::authorize(&*inner.open_url, &attempt, oauth::AUTHORIZE_TIMEOUT);
+                // Une autre tentative a pris la place de celle-ci (annulée puis relancée) : elle décide.
+                let current = inner.login.lock().as_ref().is_some_and(|a| Arc::ptr_eq(a, &attempt));
+                if !current {
+                    return;
+                }
+                *inner.login.lock() = None;
+                let token = match result {
                     Ok(t) => t,
-                    Err(e) => {
+                    Err(AuthError::Cancelled | AuthError::TimedOut) => {
+                        inner.set_status(Status::LoggedOut);
+                        return;
+                    }
+                    Err(AuthError::Failed(e)) => {
                         inner.set_status(Status::Failed(e));
                         return;
                     }
@@ -378,8 +637,27 @@ impl Spotify {
             .ok();
     }
 
-    /// Se déconnecter et oublier les identifiants.
+    /// Rouvre la page de connexion (même page, même attente).
+    pub fn reopen_login(&self) {
+        let url = self.inner.login.lock().as_ref().and_then(|a| a.url());
+        if let Some(u) = url {
+            (self.inner.open_url)(&u);
+        }
+    }
+
+    /// Abandonne la connexion en cours : retour à « Se connecter ».
+    pub fn cancel_login(&self) {
+        if let Some(a) = self.inner.login.lock().take() {
+            a.cancel();
+        }
+        if matches!(self.status(), Status::Authorizing) {
+            self.inner.set_status(Status::LoggedOut);
+        }
+    }
+
+    /// Se déconnecter et oublier les identifiants (et les listes gardées).
     pub fn logout(&self) {
+        self.cancel_login();
         if let Some(s) = self.inner.spirc.lock().take() {
             let _ = s.shutdown();
         }
@@ -389,6 +667,8 @@ impl Spotify {
         let _ = std::fs::remove_dir_all(self.inner.dir.join("credentials"));
         let _ = std::fs::remove_file(self.inner.token_path());
         *self.inner.token.lock() = None;
+        self.inner.lists.clear();
+        self.inner.waits.lock().clear();
         self.inner.set_status(Status::LoggedOut);
     }
 
@@ -444,28 +724,30 @@ impl Spotify {
         };
     }
 
-    /// Lance une requête de bibliothèque ; la réponse arrive en [`Event::Library`] avec ce numéro.
+    /// Lance une requête de bibliothèque ; les réponses arrivent en [`Event::Library`] avec ce numéro. Une
+    /// liste gardée de moins de 15 min est rendue telle quelle.
     pub fn request(&self, req: LibraryRequest) -> u64 {
+        self.spawn_request(req, false)
+    }
+
+    /// Comme [`Spotify::request`], mais redemande la liste à Spotify (« Actualiser »), sauf si Spotify a demandé
+    /// de patienter.
+    pub fn refresh(&self, req: LibraryRequest) -> u64 {
+        self.spawn_request(req, true)
+    }
+
+    fn spawn_request(&self, req: LibraryRequest, force: bool) -> u64 {
         let id = self.inner.next_request.fetch_add(1, Ordering::Relaxed);
         let inner = self.inner.clone();
-        std::thread::Builder::new()
-            .name("alpagamp-bibliotheque".into())
-            .spawn(move || {
-                let result = match &req {
-                    LibraryRequest::RadioTop => radios::top(),
-                    LibraryRequest::RadioSearch(q) => radios::search(q),
-                    other => inner.web_token().and_then(|tok| match other {
-                        LibraryRequest::Playlists { liked_label } => webapi::playlists(&tok, liked_label),
-                        LibraryRequest::Tracks(uri) => webapi::tracks_of(&tok, uri),
-                        LibraryRequest::Albums => webapi::albums(&tok),
-                        LibraryRequest::Search(q) => webapi::search(&tok, q),
-                        _ => Ok(Vec::new()),
-                    }),
-                };
-                let _ = inner.tx.send(Event::Library { request: id, result });
-            })
-            .ok();
+        std::thread::Builder::new().name("alpagamp-bibliotheque".into()).spawn(move || inner.serve(id, req, force)).ok();
         id
+    }
+}
+
+fn radio_reply(r: Result<Vec<LibraryItem>, String>) -> LibraryReply {
+    match r {
+        Ok(items) => LibraryReply::done(items),
+        Err(e) => LibraryReply::failed(Notice::Failed(Fault::Network(e))),
     }
 }
 

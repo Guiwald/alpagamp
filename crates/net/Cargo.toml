@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp-net"
-version = "0.6.1"
+version = "0.6.2"
 description = "Client HTTP/HTTPS minimal d'Alpagamp (radios, Spotify, API web), sans C"
 edition.workspace = true
 license.workspace = true

@@ -3,7 +3,10 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use parking_lot::Mutex;
 
 use alpagamp_net::{Request, fetch, form_encode};
 use base64::Engine;
@@ -78,8 +81,51 @@ fn parse_token(body: &[u8], previous_refresh: Option<&str>) -> Result<OAuthToken
 /// Page affichée dans le navigateur après l'autorisation.
 const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Alpagamp</title><body style=\"font:16px sans-serif;background:#222;color:#cfe;display:flex;align-items:center;justify-content:center;height:90vh\"><p>Alpagamp est connecté à Spotify. Vous pouvez fermer cet onglet.<br>Alpagamp is connected to Spotify. You can close this tab.</p>";
 
-/// Ouvre la page d'autorisation (par `open_url`) et attend le retour du navigateur (5 min au plus).
-pub fn authorize(open_url: &dyn Fn(&str)) -> Result<OAuthToken, String> {
+/// Attente maximale du retour du navigateur.
+pub const AUTHORIZE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Une tentative de connexion en cours : la page à rouvrir si l'onglet a été fermé, et l'annulation.
+#[derive(Default)]
+pub struct Attempt {
+    url: Mutex<Option<String>>,
+    cancelled: AtomicBool,
+}
+
+impl Attempt {
+    /// Adresse de la page d'autorisation (une fois ouverte).
+    pub fn url(&self) -> Option<String> {
+        self.url.lock().clone()
+    }
+
+    /// Annule l'attente : [`authorize`] rend la main en moins d'un dixième de seconde.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
+
+/// Pourquoi la connexion n'a pas abouti.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthError {
+    /// Annulée par l'utilisateur.
+    Cancelled,
+    /// Pas de retour du navigateur dans le délai : on revient simplement à « Se connecter ».
+    TimedOut,
+    Failed(String),
+}
+
+impl From<String> for AuthError {
+    fn from(s: String) -> Self {
+        AuthError::Failed(s)
+    }
+}
+
+/// Ouvre la page d'autorisation (par `open_url`) et attend le retour du navigateur (`timeout` au plus).
+/// Pendant l'attente, la page peut être rouverte (`attempt.url()`) ; `attempt.cancel()` l'interrompt.
+pub fn authorize(open_url: &dyn Fn(&str), attempt: &Attempt, timeout: Duration) -> Result<OAuthToken, AuthError> {
     let listener = TcpListener::bind(("127.0.0.1", PORT)).or_else(|_| TcpListener::bind(("127.0.0.1", 0))).map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let redirect = format!("http://127.0.0.1:{port}/login");
@@ -91,20 +137,24 @@ pub fn authorize(open_url: &dyn Fn(&str)) -> Result<OAuthToken, String> {
         form_encode(&SCOPES.join(" ")),
         form_encode(&redirect)
     );
+    *attempt.url.lock() = Some(url.clone());
     open_url(&url);
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + Duration::from_secs(300);
+    let deadline = Instant::now() + timeout;
     let code = loop {
+        if attempt.is_cancelled() {
+            return Err(AuthError::Cancelled);
+        }
         if Instant::now() > deadline {
-            return Err("connexion à Spotify abandonnée (délai dépassé)".into());
+            return Err(AuthError::TimedOut);
         }
         let (mut s, _) = match listener.accept() {
             Ok(c) => c,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(50));
                 continue;
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(AuthError::Failed(e.to_string())),
         };
         let _ = s.set_nonblocking(false);
         let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
@@ -120,7 +170,7 @@ pub fn authorize(open_url: &dyn Fn(&str)) -> Result<OAuthToken, String> {
         let param = |name: &str| query.split('&').find_map(|kv| kv.strip_prefix(&format!("{name}="))).map(percent_decode);
         let _ = s.write_all(format!("HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n{DONE_PAGE}", DONE_PAGE.len()).as_bytes());
         if let Some(err) = param("error") {
-            return Err(format!("Spotify a refusé la connexion ({err})"));
+            return Err(AuthError::Failed(format!("Spotify a refusé la connexion ({err})")));
         }
         if param("state").as_deref() != Some(state.as_str()) {
             continue;
@@ -137,9 +187,9 @@ pub fn authorize(open_url: &dyn Fn(&str)) -> Result<OAuthToken, String> {
     );
     let (resp, body) = fetch(TOKEN, &Request::post("application/x-www-form-urlencoded", body.into_bytes())).map_err(|e| e.0)?;
     if resp.status != 200 {
-        return Err(format!("Spotify refuse le jeton ({}) : {}", resp.status, String::from_utf8_lossy(&body)));
+        return Err(AuthError::Failed(format!("Spotify refuse le jeton ({}) : {}", resp.status, String::from_utf8_lossy(&body))));
     }
-    parse_token(&body, None)
+    Ok(parse_token(&body, None)?)
 }
 
 /// Renouvelle un jeton expiré.
@@ -155,7 +205,7 @@ pub fn refresh(token: &OAuthToken) -> Result<OAuthToken, String> {
     parse_token(&body, Some(&token.refresh_token))
 }
 
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -209,9 +259,13 @@ mod tests {
         let opened = std::sync::Arc::new(parking_lot::Mutex::new(String::new()));
         let o2 = opened.clone();
         let h = std::thread::spawn(move || {
-            authorize(&move |u: &str| {
-                *o2.lock() = u.to_string();
-            })
+            authorize(
+                &move |u: &str| {
+                    *o2.lock() = u.to_string();
+                },
+                &Attempt::default(),
+                AUTHORIZE_TIMEOUT,
+            )
         });
         let url = loop {
             let u = opened.lock().clone();
@@ -231,6 +285,31 @@ mod tests {
         let _ = s.read_to_string(&mut resp);
         assert!(resp.contains("Alpagamp"));
         let r = h.join().unwrap();
-        assert!(r.unwrap_err().contains("access_denied"));
+        assert!(matches!(r, Err(AuthError::Failed(e)) if e.contains("access_denied")));
+    }
+
+    /// Onglet fermé : on peut rouvrir la même page, puis annuler ; l'attente s'arrête aussitôt.
+    #[test]
+    fn waiting_can_be_reopened_and_cancelled() {
+        let attempt = std::sync::Arc::new(Attempt::default());
+        let a2 = attempt.clone();
+        let opened = std::sync::Arc::new(parking_lot::Mutex::new(0));
+        let o2 = opened.clone();
+        let h = std::thread::spawn(move || authorize(&move |_| *o2.lock() += 1, &a2, AUTHORIZE_TIMEOUT));
+        let url = loop {
+            if let Some(u) = attempt.url() {
+                break u;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(url.starts_with(AUTHORIZE));
+        let t = Instant::now();
+        attempt.cancel();
+        assert_eq!(h.join().unwrap(), Err(AuthError::Cancelled));
+        assert!(t.elapsed() < Duration::from_secs(1));
+        assert_eq!(*opened.lock(), 1);
+        // Délai dépassé : pas d'erreur à afficher, juste « TimedOut ».
+        let r = authorize(&|_| {}, &Attempt::default(), Duration::from_millis(100));
+        assert_eq!(r, Err(AuthError::TimedOut));
     }
 }

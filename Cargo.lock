@@ -65,7 +65,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "alpagamp"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-android"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-audio"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-core",
  "alpagamp-net",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-core"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "fastrand",
  "log",
@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-milkdrop"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-net",
  "fastrand",
@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-museum"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-core",
  "alpagamp-net",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-net"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "log",
  "rustls 0.23.45",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-player"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-plugins"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-skin"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "log",
  "png",
@@ -221,21 +221,26 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-spotify"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-audio",
  "alpagamp-core",
  "alpagamp-net",
  "base64 0.22.1",
+ "bytes",
  "crossbeam-channel",
  "futures-util",
  "getrandom 0.3.4",
+ "http",
+ "http-body-util",
  "librespot-connect",
  "librespot-core",
  "librespot-metadata",
  "librespot-playback",
+ "librespot-protocol",
  "log",
  "parking_lot",
+ "protobuf",
  "serde",
  "serde_json",
  "sha2",
@@ -244,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "alpagamp-ui"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alpagamp-core",
  "alpagamp-skin",

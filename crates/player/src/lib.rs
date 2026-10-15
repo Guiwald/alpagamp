@@ -589,7 +589,7 @@ impl Scanner {
         let (done, rx) = channel();
         let _ = std::thread::Builder::new().name("alpagamp-tags".into()).spawn(move || {
             while let Ok((id, path)) = jobs.recv() {
-                let (title, duration) = match Decoder::open_file(&path) {
+                let (title, duration) = match Decoder::probe_file(&path) {
                     Ok(d) => (d.info.display_title(), d.info.duration_ms),
                     Err(_) => (None, None),
                 };

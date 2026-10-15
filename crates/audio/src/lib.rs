@@ -8,6 +8,7 @@
 pub mod decode;
 pub mod dsp;
 pub mod output;
+pub mod readahead;
 pub mod resample;
 pub mod stream;
 

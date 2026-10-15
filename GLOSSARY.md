@@ -46,3 +46,8 @@ Le vocabulaire commun du projet. Un terme = un sens ; le code, les docs et les c
 | **Effet audio** (DSP) | Plugin qui transforme le son, après l'égaliseur, dans le fil de décodage. |
 | **Carburant** (fuel) | Budget de calcul donné à chaque appel d'un plugin ; épuisé, le plugin est arrêté et éteint. |
 | **Visualisation de plugin** | Image calculée par un plugin `vis`, affichée à la place de MilkDrop dans la fenêtre de visualisation. |
+| **Canaux internes** (spclient) | Les services de Spotify qu'utilisent ses propres applis, joints par la session librespot : liste des playlists, collection, métadonnées, recherche de titres. La Bibliothèque passe par eux depuis la 0.6.2 (ADR 0022). |
+| **API web** | L'API publique de Spotify (`api.spotify.com`). Fortement bridée pour les jetons du lecteur de bureau ; ne sert plus qu'à chercher des albums et des playlists (ADR 0022). |
+| **Liste gardée** | Une liste de la Bibliothèque enregistrée sur disque : affichée tout de suite, redemandée au-delà de 15 min ou par « Actualiser » (ADR 0022). |
+| **Attente** (429, `Retry-After`) | Quand Spotify demande de patienter : rien n'est redemandé à ce canal avant l'échéance ; la Bibliothèque affiche un compte à rebours (ADR 0022). |
+| **Lecture d'avance** | Un fil lit le fichier local jusqu'à 16 Mo devant le décodeur, pour qu'un disque lent ne coupe pas la musique (ADR 0022). |

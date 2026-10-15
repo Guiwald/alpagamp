@@ -131,6 +131,8 @@ pub struct Mobile {
     skins: SkinBrowser,
     spotify: Arc<Spotify>,
     lib_pending: Option<u64>,
+    /// Chargement en cours : éléments prêts, sur combien.
+    lib_progress: Option<(usize, usize)>,
     enqueue_pending: Option<u64>,
     fbs: [Image; 4],
     eq_open: bool,
@@ -204,6 +206,7 @@ impl Mobile {
             skins,
             spotify,
             lib_pending: None,
+            lib_progress: None,
             enqueue_pending: None,
             fbs: [Image::new(1, 1, 0), Image::new(1, 1, 0), Image::new(1, 1, 0), Image::new(1, 1, 0)],
             eq_open,
@@ -337,7 +340,7 @@ impl Mobile {
                 m.text.clone()
             }
             Some(Overlay::Library) => {
-                let status = library_status(&self.spotify, &self.lib_ui, self.lib_pending.is_some());
+                let status = library_status(&self.spotify, &self.lib_ui, self.lib_pending.is_some(), self.lib_progress);
                 let prompt = if self.lib_ui.tab == LibTab::Radios { t("lib.radio_prompt") } else { t("lib.search_prompt") };
                 let view = LibraryView {
                     active: true,
@@ -857,7 +860,15 @@ impl Mobile {
                 ],
             ),
             MenuItem::sub(t("menu.plugins"), self.plugins_menu()),
-            if self.spotify.is_connected() { MenuItem::new("spotify_logout", t("lib.logout")) } else { MenuItem::new("spotify_login", t("lib.login")) },
+            match self.spotify.status() {
+                SpotifyStatus::Connected { .. } => MenuItem::new("spotify_logout", t("lib.logout")),
+                // L'onglet du navigateur a pu être fermé : rouvrir la même page, ou abandonner.
+                SpotifyStatus::Authorizing => MenuItem::sub(
+                    "Spotify",
+                    vec![MenuItem::new("spotify_login", t("lib.reopen")), MenuItem::new("spotify_cancel_login", t("lib.cancel_login"))],
+                ),
+                _ => MenuItem::new("spotify_login", t("lib.login")),
+            },
             MenuItem::separator(),
             MenuItem::new("about", t("menu.about")),
             MenuItem::new("exit", t("menu.exit")),
@@ -968,6 +979,10 @@ impl Mobile {
             }
             "spotify_logout" => {
                 self.spotify.logout();
+                self.load_library_tab();
+            }
+            "spotify_cancel_login" => {
+                self.spotify.cancel_login();
                 self.load_library_tab();
             }
             "music_scan" => self.scan_music(true),
@@ -1263,22 +1278,43 @@ impl Mobile {
     fn load_library_tab(&mut self) {
         let tab = self.lib_ui.tab;
         self.lib_pending = None;
-        let connected = self.spotify.is_connected();
+        self.lib_progress = None;
+        let status = self.spotify.status();
+        // Pendant la connexion, les listes gardées s'affichent déjà.
+        let can_ask = matches!(status, SpotifyStatus::Connected { .. } | SpotifyStatus::Connecting);
         let req = match tab {
             LibTab::Radios => Some(LibraryRequest::RadioTop),
             LibTab::Search => None,
-            _ if !connected => None,
-            LibTab::Playlists => Some(LibraryRequest::Playlists { liked_label: t("lib.liked_title").to_string() }),
-            LibTab::Liked => Some(LibraryRequest::Tracks("spotify:collection".into())),
-            LibTab::Albums => Some(LibraryRequest::Albums),
+            _ if !can_ask => None,
+            _ => self.tab_request(tab),
         };
-        let mut items = Vec::new();
-        if tab != LibTab::Radios && !connected && !matches!(self.spotify.status(), SpotifyStatus::Authorizing | SpotifyStatus::Connecting) {
-            items.push(LibraryItem::new(LibraryKind::Action, t("lib.login"), "", "action:login"));
-        }
+        let items = if tab == LibTab::Radios { Vec::new() } else { login_rows(&status) };
         self.lib_ui.set_items(items);
         if let Some(r) = req {
             self.lib_pending = Some(self.spotify.request(r));
+        }
+    }
+
+    /// La requête de la racine d'un onglet Spotify.
+    fn tab_request(&self, tab: LibTab) -> Option<LibraryRequest> {
+        match tab {
+            LibTab::Playlists => Some(LibraryRequest::Playlists { liked_label: t("lib.liked_title").to_string() }),
+            LibTab::Liked => Some(LibraryRequest::Tracks("spotify:collection".into())),
+            LibTab::Albums => Some(LibraryRequest::Albums),
+            LibTab::Search if !self.lib_ui.query.trim().is_empty() => Some(LibraryRequest::Search(self.lib_ui.query.clone())),
+            _ => None,
+        }
+    }
+
+    /// « Actualiser » ou « Réessayer maintenant » : redemande la vue courante à Spotify.
+    fn library_refresh(&mut self) {
+        let req = match self.lib_ui.current_uri() {
+            Some(uri) => Some(LibraryRequest::Tracks(uri.to_string())),
+            None => self.tab_request(self.lib_ui.tab),
+        };
+        if let Some(r) = req {
+            self.lib_progress = None;
+            self.lib_pending = Some(self.spotify.refresh(r));
         }
     }
 
@@ -1286,7 +1322,8 @@ impl Mobile {
         match a {
             LibraryAction::Tab(_) => self.load_library_tab(),
             LibraryAction::Open(item) => {
-                self.lib_ui.push(&item.title, Vec::new());
+                self.lib_ui.push_uri(&item.title, &item.uri, Vec::new());
+                self.lib_progress = None;
                 self.lib_pending = Some(self.spotify.request(LibraryRequest::Tracks(item.uri)));
             }
             LibraryAction::Search { tab, query } => {
@@ -1294,17 +1331,24 @@ impl Mobile {
                 self.lib_ui.set_items(Vec::new());
                 let r = if tab == LibTab::Radios { LibraryRequest::RadioSearch(query) } else { LibraryRequest::Search(query) };
                 if tab == LibTab::Radios || self.spotify.is_connected() {
+                    self.lib_progress = None;
                     self.lib_pending = Some(self.spotify.request(r));
                 } else {
                     self.load_library_tab();
                 }
             }
-            LibraryAction::Activate(item) => {
-                if item.uri == "action:login" {
+            LibraryAction::Activate(item) => match item.uri.as_str() {
+                "action:login" | "action:login_reopen" => {
                     self.spotify.login();
                     self.load_library_tab();
                 }
-            }
+                "action:login_cancel" => {
+                    self.spotify.cancel_login();
+                    self.load_library_tab();
+                }
+                u if alpagamp_spotify::library::is_refresh_row(u) => self.library_refresh(),
+                _ => {}
+            },
             LibraryAction::Play { items, start } => {
                 let entries: Vec<Entry> = items.iter().map(library_entry).collect();
                 if entries.is_empty() {
@@ -1328,9 +1372,15 @@ impl Mobile {
     fn spotify_events(&mut self) {
         for ev in self.spotify.poll_events() {
             match ev {
-                SpotifyEvent::Status(_) => {
-                    if self.lib_ui.tab != LibTab::Radios && matches!(self.overlay, Some(Overlay::Library)) {
-                        self.load_library_tab();
+                SpotifyEvent::Status(st) => {
+                    // Une requête déjà partie attend la connexion : inutile d'en relancer une.
+                    let waiting = matches!(st, SpotifyStatus::Connected { .. }) && self.lib_pending.is_some();
+                    if self.lib_ui.tab != LibTab::Radios && !self.lib_ui.can_go_back() && !waiting {
+                        if matches!(self.overlay, Some(Overlay::Library)) {
+                            self.load_library_tab();
+                        } else {
+                            self.lib_ui.set_items(Vec::new());
+                        }
                     }
                 }
                 SpotifyEvent::ConnectStart => self.player.play_external(Media::Custom(self.spotify.connect_opener()), "Spotify Connect"),
@@ -1349,21 +1399,25 @@ impl Mobile {
                         self.player.stop();
                     }
                 }
-                SpotifyEvent::Library { request, result } if self.enqueue_pending == Some(request) => {
-                    self.enqueue_pending = None;
-                    if let Ok(items) = result {
-                        self.player.playlist.extend(items.iter().filter(|i| i.is_playable()).map(library_entry));
+                SpotifyEvent::Library { request, reply } if self.enqueue_pending == Some(request) => {
+                    // Ajout à la playlist : la première liste entière (gardée ou fraîche) suffit.
+                    if reply.complete {
+                        self.enqueue_pending = None;
+                        self.player.playlist.extend(reply.items.iter().filter(|i| i.is_playable()).map(library_entry));
                         self.player.playlist_changed();
+                    } else if reply.last {
+                        self.enqueue_pending = None;
                     }
                 }
-                SpotifyEvent::Library { request, result } => {
+                SpotifyEvent::Library { request, reply } => {
                     if self.lib_pending == Some(request) {
-                        self.lib_pending = None;
-                        match result {
-                            Ok(items) if items.is_empty() => self.lib_ui.set_items(vec![LibraryItem::info(t("lib.empty"))]),
-                            Ok(items) => self.lib_ui.set_items(items),
-                            Err(e) => self.lib_ui.set_items(vec![LibraryItem::info(e)]),
+                        if reply.last {
+                            self.lib_pending = None;
+                            self.lib_progress = None;
+                        } else {
+                            self.lib_progress = reply.progress;
                         }
+                        self.lib_ui.update_items(alpagamp_spotify::library::rows(&reply, alpagamp_spotify::library::now_secs()));
                     }
                 }
             }
@@ -1421,9 +1475,12 @@ impl Mobile {
     }
 }
 
-fn library_status(sp: &Spotify, lib: &LibraryWindow, loading: bool) -> String {
+fn library_status(sp: &Spotify, lib: &LibraryWindow, loading: bool, progress: Option<(usize, usize)>) -> String {
     if loading {
-        return t("lib.loading").to_string();
+        return match progress {
+            Some((n, total)) => t("lib.loading_n").replace("{n}", &n.to_string()).replace("{total}", &total.to_string()),
+            None => t("lib.loading").to_string(),
+        };
     }
     if lib.tab == LibTab::Radios {
         return String::new();
@@ -1434,6 +1491,19 @@ fn library_status(sp: &Spotify, lib: &LibraryWindow, loading: bool) -> String {
         SpotifyStatus::Connecting => t("lib.connecting").to_string(),
         SpotifyStatus::Connected { user } => format!("Spotify : {user}"),
         SpotifyStatus::Failed(e) => format!("Spotify : {e}"),
+    }
+}
+
+/// Lignes de la Bibliothèque selon l'état de la connexion : « Se connecter », ou pendant l'attente du
+/// navigateur « Rouvrir la page de connexion » et « Annuler ».
+fn login_rows(status: &SpotifyStatus) -> Vec<LibraryItem> {
+    match status {
+        SpotifyStatus::LoggedOut | SpotifyStatus::Failed(_) => vec![LibraryItem::new(LibraryKind::Action, t("lib.login"), "", "action:login")],
+        SpotifyStatus::Authorizing => vec![
+            LibraryItem::new(LibraryKind::Action, t("lib.reopen"), "", "action:login_reopen"),
+            LibraryItem::new(LibraryKind::Action, t("lib.cancel"), "", "action:login_cancel"),
+        ],
+        _ => Vec::new(),
     }
 }
 
@@ -1572,6 +1642,10 @@ impl ApplicationHandler for Mobile {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         self.spotify_events();
+        if matches!(self.overlay, Some(Overlay::Library)) {
+            // Comptes à rebours (« réessaie dans 11:42 »).
+            alpagamp_spotify::library::tick_rows(self.lib_ui.items_mut(), alpagamp_spotify::library::now_secs());
+        }
         self.milk_tick();
         let skins_visible = matches!(self.overlay, Some(Overlay::Skins));
         if let Some(a) = self.skins.tick(skins_visible, &self.default_skin) {

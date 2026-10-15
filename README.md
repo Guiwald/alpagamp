@@ -64,7 +64,7 @@ La version actuelle est la **0.6** : c'est une préversion. Elle marche, mais il
 | 0.3 | Les radios, le fondu enchaîné, ReplayGain, les signets, la première version Android | fait |
 | 0.4 | Spotify : connexion, Bibliothèque, Spotify Connect | fait |
 | 0.5 | Les visualisations façon MilkDrop (plein écran), le navigateur de skins, la taille des fenêtres | fait |
-| 0.6 | Des extensions (plugins) qu'on peut ajouter, avec trois exemples | **version actuelle** |
+| 0.6 | Des extensions (plugins) qu'on peut ajouter, avec trois exemples ; en 0.6.2, une Bibliothèque Spotify qui ne se fait plus brider | **version actuelle** |
 | 0.7 | Android complet (musique qui continue écran éteint, commandes sur l'écran verrouillé), 7 langues partout | à venir |
 | 1.0 | Version finale, testée sur Mac, Android et Windows | à venir |
 
@@ -197,6 +197,14 @@ Il faut un compte **Spotify Premium** (c'est une condition de Spotify pour les l
 3. Reviens dans Alpagamp : la fenêtre **Bibliothèque** (Alt + L) affiche tes playlists, tes titres likés, tes
    albums, et une recherche. Double-clic sur un élément pour le jouer, bouton **Ajouter** pour le mettre dans la
    playlist.
+
+Tu as fermé l'onglet du navigateur trop tôt ? Pendant l'attente, la Bibliothèque propose **Rouvrir la page de
+connexion** et **Annuler**.
+
+Alpagamp garde les listes déjà reçues : elles s'affichent tout de suite, et sont redemandées à Spotify au plus tous
+les quarts d'heure. La ligne **Actualiser**, en tête de liste, les redemande tout de suite (elle dit de quand date
+la liste). Si Spotify demande de patienter, la Bibliothèque l'écrit avec un compte à rebours et attend l'heure dite.
+La recherche trouve des titres ; les albums et les playlists s'y ajoutent quand Spotify le permet.
 
 Ton mot de passe Spotify ne passe jamais par Alpagamp : tu le tapes sur le site de Spotify. Alpagamp garde
 ensuite une autorisation sur ton ordinateur seulement, pour ne pas te redemander de te connecter. Pour l'effacer :
@@ -337,6 +345,12 @@ Si tu as branché un casque après avoir lancé Alpagamp, relance-le.
 
 **Spotify : « Spotify Premium requis »** → ton compte est gratuit : Spotify ne permet pas aux autres lecteurs
 de jouer sa musique avec un compte gratuit.
+
+**Spotify : « Spotify demande de patienter » ou une liste vide** → Spotify limite le nombre de demandes ; le
+compte à rebours dit quand réessayer. Pour savoir ce qui bloque, le diagnostic interroge chaque service et écrit un
+rapport (codes de réponse et durées, aucun mot de passe ni jeton) — sur Mac, dans le Terminal :
+`/Applications/Alpagamp.app/Contents/MacOS/alpagamp --diagnostic-spotify ~/Desktop/diagnostic-spotify.txt`
+(sous Windows : `alpagamp.exe --diagnostic-spotify diagnostic-spotify.txt` dans le dossier d'Alpagamp).
 
 **Spotify : Alpagamp n'apparaît pas dans les appareils** → vérifie qu'Alpagamp est ouvert et connecté avec le
 **même compte** Spotify que ton téléphone, puis attends quelques secondes.

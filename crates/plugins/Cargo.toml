@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp-plugins"
-version = "0.6.1"
+version = "0.6.2"
 description = "Hôte des plugins WebAssembly d'Alpagamp (API v1, ADR 0020) : visualisations, effets audio, plugins généraux"
 edition.workspace = true
 license.workspace = true

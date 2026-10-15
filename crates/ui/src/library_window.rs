@@ -77,6 +77,8 @@ enum Zone {
 
 struct ViewState {
     title: String,
+    /// Adresse du contenant affiché (playlist, album), vide à la racine d'un onglet.
+    uri: String,
     items: Vec<LibraryItem>,
     sel: Option<usize>,
     scroll: usize,
@@ -113,7 +115,7 @@ impl LibraryWindow {
             tab: LibTab::Playlists,
             query: String::new(),
             caret: 0,
-            view: ViewState { title: String::new(), items: Vec::new(), sel: None, scroll: 0 },
+            view: ViewState { title: String::new(), uri: String::new(), items: Vec::new(), sel: None, scroll: 0 },
             stack: Vec::new(),
             pressed: None,
             pressed_inside: false,
@@ -144,16 +146,41 @@ impl LibraryWindow {
         &self.view.items
     }
 
+    /// Les éléments de la vue courante, modifiables sur place (comptes à rebours).
+    pub fn items_mut(&mut self) -> &mut [LibraryItem] {
+        &mut self.view.items
+    }
+
+    /// Remplace les éléments de la vue courante en gardant la position (liste actualisée) : l'élément
+    /// sélectionné reste sélectionné s'il est toujours là, le défilement est gardé.
+    pub fn update_items(&mut self, items: Vec<LibraryItem>) {
+        let selected = self.view.sel.and_then(|i| self.view.items.get(i)).map(|it| it.uri.clone()).filter(|u| !u.is_empty());
+        self.view.items = items;
+        self.view.sel = selected.and_then(|u| self.view.items.iter().position(|it| it.uri == u));
+        let max = self.view.items.len().saturating_sub(self.visible_rows());
+        self.view.scroll = self.view.scroll.min(max);
+    }
+
+    /// Adresse du contenant affiché (playlist, album), s'il y en a un.
+    pub fn current_uri(&self) -> Option<&str> {
+        Some(self.view.uri.as_str()).filter(|u| !u.is_empty())
+    }
+
     /// Change d'onglet (vide la navigation).
     pub fn set_tab(&mut self, tab: LibTab) {
         self.tab = tab;
         self.stack.clear();
-        self.view = ViewState { title: String::new(), items: Vec::new(), sel: None, scroll: 0 };
+        self.view = ViewState { title: String::new(), uri: String::new(), items: Vec::new(), sel: None, scroll: 0 };
     }
 
     /// Entre dans un contenant : la vue courante est gardée pour « Retour ».
     pub fn push(&mut self, title: &str, items: Vec<LibraryItem>) {
-        let prev = std::mem::replace(&mut self.view, ViewState { title: title.to_string(), items, sel: None, scroll: 0 });
+        self.push_uri(title, "", items);
+    }
+
+    /// Entre dans le contenant `uri` (pour pouvoir l'actualiser).
+    pub fn push_uri(&mut self, title: &str, uri: &str, items: Vec<LibraryItem>) {
+        let prev = std::mem::replace(&mut self.view, ViewState { title: title.to_string(), uri: uri.to_string(), items, sel: None, scroll: 0 });
         self.stack.push(prev);
     }
 
@@ -579,5 +606,25 @@ mod tests {
         let v = LibraryView { active: true, title: "Bibliothèque", tabs: ["Playlists", "Likés", "Albums", "Chercher", "Radios"], prompt: "Chercher", back: "‹", play: "Lire", add: "Ajouter", status: "Chargement…" };
         w.render(&mut fb, &skin, &v);
         assert!(!w.text.is_empty());
+    }
+
+    #[test]
+    fn refreshed_list_keeps_selection_and_container() {
+        let mut w = LibraryWindow::default();
+        w.push_uri("Punk", "spotify:playlist:p", (0..40).map(|i| track(&i.to_string())).collect());
+        assert_eq!(w.current_uri(), Some("spotify:playlist:p"));
+        w.select(20);
+        w.scroll_by(15);
+        // Liste actualisée : une ligne « Actualiser » en tête, l'élément choisi reste choisi.
+        let mut fresh = vec![LibraryItem::new(LibraryKind::Action, "Actualiser", "", "action:refresh")];
+        fresh.extend((0..40).map(|i| track(&i.to_string())));
+        w.update_items(fresh);
+        assert_eq!(w.items().len(), 41);
+        assert_eq!(w.view.sel, Some(21));
+        assert!(w.view.scroll > 0);
+        w.items_mut()[0].title = "Réessayer".into();
+        assert_eq!(w.items()[0].title, "Réessayer");
+        w.back();
+        assert_eq!(w.current_uri(), None);
     }
 }

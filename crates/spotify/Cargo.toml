@@ -1,6 +1,6 @@
 [package]
 name = "alpagamp-spotify"
-version = "0.6.1"
+version = "0.6.2"
 description = "Spotify dans Alpagamp : connexion, lecture par librespot dans la chaîne audio, Spotify Connect, bibliothèque"
 edition.workspace = true
 license.workspace = true
@@ -23,6 +23,13 @@ getrandom = "0.3"
 librespot-playback = { version = "0.8", default-features = false }
 librespot-metadata = { version = "0.8", default-features = false }
 librespot-connect = { version = "0.8", default-features = false }
+# Canaux internes de Spotify (ADR 0022) : messages protobuf de librespot et requêtes HTTP faites à la main
+# (mêmes versions que librespot, rien de neuf à compiler).
+librespot-protocol = "0.8"
+protobuf = "3.7"
+http = "1"
+bytes = "1"
+http-body-util = "0.1"
 
 # TLS de librespot : celui du système sur Mac et Windows ; rustls (avec ring) ailleurs. Voir ADR 0018.
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "ios"))'.dependencies]

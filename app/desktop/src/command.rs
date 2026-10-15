@@ -51,6 +51,8 @@ pub enum Command {
     ToggleLibrary,
     SpotifyLogin,
     SpotifyLogout,
+    /// Abandonner la connexion en cours (onglet du navigateur fermé).
+    SpotifyCancelLogin,
     JumpToFile,
     // --- Égaliseur ---
     ToggleEq,

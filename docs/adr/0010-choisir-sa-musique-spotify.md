@@ -1,6 +1,7 @@
 # ADR 0010 — Choisir sa musique Spotify, sans configuration
 
-- Statut : acceptée (13/10/2026)
+- Statut : acceptée (13/10/2026), révisée par l'ADR 0022 (15/10/2026, 0.6.2 : navigation par les canaux internes,
+  option avancée reportée)
 
 ## Contexte
 
