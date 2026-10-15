@@ -15,6 +15,9 @@ use parking_lot::{Condvar, Mutex};
 pub const RATE: u32 = 44_100;
 /// Au-delà (≈ 2 s), la sortie attend que la source consomme.
 const MAX_SAMPLES: usize = RATE as usize * 2 * 2;
+/// Pendant une pause demandée par Alpagamp, la sortie ne s'arrête qu'ici (≈ 4 s) : le lecteur de librespot doit
+/// pouvoir rendre la main pour voir la commande Pause (voir [`Shared::set_hold`]).
+const HARD_MAX: usize = MAX_SAMPLES * 2;
 /// En dessous (≈ 0,2 s), la source se déclare « pas prête » (sauf fin de morceau).
 const LOW_WATER: usize = RATE as usize * 2 / 5;
 
@@ -25,6 +28,8 @@ struct State {
     ended: bool,
     /// La source a été abandonnée : la sortie ne doit plus attendre.
     closed: bool,
+    /// Alpagamp a mis la lecture en pause : la sortie ne bloque plus à `MAX_SAMPLES` (seulement à `HARD_MAX`).
+    hold: bool,
     info: Option<TrackInfo>,
     info_changed: bool,
     /// Nouvelle position (ms) à annoncer au moteur (changement de morceau en Connect).
@@ -89,6 +94,7 @@ impl Shared {
         let mut st = self.st.lock();
         st.closed = false;
         st.ended = false;
+        st.hold = false;
         st.samples.clear();
     }
 
@@ -109,9 +115,18 @@ impl Shared {
         }
     }
 
+    /// Pause demandée par Alpagamp (`true`) ou reprise (`false`). Le moteur d'Alpagamp cesse aussitôt de lire le
+    /// tampon ; sans ce drapeau, la sortie de librespot attendrait de la place sans fin, et son lecteur ne verrait
+    /// la commande Pause qu'à la reprise, après la commande Lecture : Spotify Connect resterait « en pause » et
+    /// chargerait le morceau suivant en pause (essai sur le Mac du 15/10/2026).
+    pub fn set_hold(&self, on: bool) {
+        self.st.lock().hold = on;
+        self.cond.notify_all();
+    }
+
     fn push(&self, data: &[f32]) {
         let mut st = self.st.lock();
-        while st.samples.len() >= MAX_SAMPLES && !st.closed {
+        while !st.closed && (st.samples.len() >= HARD_MAX || (st.samples.len() >= MAX_SAMPLES && !st.hold)) {
             self.cond.wait_for(&mut st, Duration::from_millis(100));
         }
         if !st.closed {
@@ -233,5 +248,26 @@ mod tests {
         assert_eq!(total, 5000);
         sh.set_info(TrackInfo { title: Some("T".into()), ..Default::default() });
         assert_eq!(src.take_info_update().and_then(|i| i.title).as_deref(), Some("T"));
+    }
+
+    /// En pause demandée par Alpagamp, la sortie ne bloque pas le lecteur de librespot (jusqu'à `HARD_MAX`).
+    #[test]
+    fn hold_does_not_block_the_player() {
+        let sh = Shared::new();
+        sh.push(&vec![0.0; MAX_SAMPLES]);
+        sh.set_hold(true);
+        sh.push(&[0.0; 1000]); // sans le drapeau, attendrait sans fin
+        assert_eq!(sh.st.lock().samples.len(), MAX_SAMPLES + 1000);
+        // Au-delà de HARD_MAX, la sortie attend de nouveau.
+        sh.push(&vec![0.0; HARD_MAX - MAX_SAMPLES]);
+        let sh2 = sh.clone();
+        let t = std::thread::spawn(move || sh2.push(&[0.0; 1000]));
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!t.is_finished());
+        sh.close();
+        t.join().unwrap();
+        // Reprise : on bloque de nouveau à MAX_SAMPLES ; une nouvelle session repart sans le drapeau.
+        sh.reopen();
+        assert!(!sh.st.lock().hold);
     }
 }

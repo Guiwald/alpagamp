@@ -214,6 +214,8 @@ impl Inner {
             while let Some(ev) = events.recv().await {
                 match ev {
                     PlayerEvent::Playing { position_ms, .. } => {
+                        // Reprise, d'où qu'elle vienne (Alpagamp ou l'appli Spotify) : le tampon reprend sa taille.
+                        me.connect.set_hold(false);
                         if !me.connect_active.swap(true, Ordering::AcqRel) {
                             me.connect.reopen();
                             me.connect.flush(Some(position_ms as u64));
@@ -716,8 +718,16 @@ impl Spotify {
         let spirc = self.inner.spirc.lock();
         let Some(s) = spirc.as_ref() else { return };
         let _ = match c {
-            ConnectCommand::Play => s.play(),
-            ConnectCommand::Pause => s.pause(),
+            ConnectCommand::Play => {
+                self.inner.connect.set_hold(false);
+                s.play()
+            }
+            ConnectCommand::Pause => {
+                // Le moteur d'Alpagamp s'arrête de lire : le lecteur de librespot ne doit pas rester bloqué sur le
+                // tampon plein, sinon il ne verrait cette commande qu'à la reprise (voir `Shared::set_hold`).
+                self.inner.connect.set_hold(true);
+                s.pause()
+            }
             ConnectCommand::Next => s.next(),
             ConnectCommand::Previous => s.prev(),
             ConnectCommand::Seek(ms) => s.set_position_ms(ms as u32),
